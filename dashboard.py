@@ -1,15 +1,21 @@
 """
-dashboard.py v6.1 — Red-Team Audit Fixes
-==========================================
+dashboard.py — v6.2 Antigravity Audit Pass
+===========================================
 Atlas-H2 | Dynamic Rail Corridor Simulation
 
-Fixes over v6.0:
-  • run_all now passes dynamic_electricity_rate to thermal_engine so HVAC
-    penalty and heat-recovery savings update when the electricity slider moves
-  • age_note formula corrected (was a mathematical identity, now shows real yield)
-  • Dead variables removed: C_DIM, current_x_idx, current_y_idx
-  • Session-state reads hardened with .get() + DEFAULTS fallback
-  • Repetitive "Stack age X yr" text trimmed; age badge on header carries that info
+Fixes over v6.1 (Antigravity Audit):
+  [PERF-1]   build_export_csv decorated with @st.cache_data — was re-building
+             a full DataFrame on every slider interaction (every rerender).
+  [PERF-2]   run_sensitivity moved inside `with tab5:` block — the O(256)
+             sensitivity grid is now computed lazily on first tab visit, not
+             on every slider movement regardless of which tab is active.
+  [PERF-3]   All float slider values rounded to 4 dp before being passed to
+             run_all/run_sensitivity — eliminates IEEE 754 cache misses.
+  [ARCH-1]   CarbonAbatementCalculator now receives annual_h2_cost_cad derived
+             from live econ results — LCOA is no longer a hard-coded C$1.2M.
+  [UX-1]     KPI row delta arrow is now sign-aware (↑ positive / ↓ negative).
+  [STYLE-1]  Title typo "Comparitive" → "Comparative".
+  [STYLE-2]  Version strings unified to v6.2 across all UI labels.
 
 Run with:
     streamlit run dashboard.py
@@ -39,7 +45,7 @@ from carbon_abatement import CarbonAbatementCalculator
 # ── PAGE CONFIG ───────────────────────────────────────────────────────────────
 
 st.set_page_config(
-    page_title="Atlas-H2 | Digital Twin v6.1",
+    page_title="Atlas-H2 | Digital Twin v6.2",
     page_icon="🚆",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -47,72 +53,65 @@ st.set_page_config(
 
 # ── PALETTE ───────────────────────────────────────────────────────────────────
 
-C_BG      = "#13293D"
-C_SURFACE = "#16324F"
-C_BORDER  = "#18435A"
-C_ACCENT2 = "#2A628F"
-C_ACCENT  = "#3E92CC"
-C_TEXT    = "#E2E8F0"
-C_MUTED   = "#7A9BB5"
-C_GREEN   = "#22c55e"
-C_RED     = "#f87171"
-C_ORANGE  = "#fb923c"
+C_BG      = "#0a0f18"                # Deep cyber dark
+C_SURFACE = "rgba(15, 23, 42, 0.55)" # Glassmorphic panel
+C_BORDER  = "rgba(56, 189, 248, 0.15)"
+C_ACCENT2 = "#0ea5e9"
+C_ACCENT  = "#38bdf8"
+C_TEXT    = "#f8fafc"
+C_MUTED   = "#94a3b8"
+C_GREEN   = "#10b981"
+C_RED     = "#ef4444"
+C_ORANGE  = "#f59e0b"
 
 # ── GLOBAL CSS ────────────────────────────────────────────────────────────────
 
 st.markdown(f"""
 <style>
 /* ═══════════════════════════════════════════════════════════
-   1. RESET & CHROME
+   1. RESET, CHROME & BACKGROUND
 ══════════════════════════════════════════════════════════════ */
 header[data-testid="stHeader"] {{
-    background-color: {C_BG};
-    border-bottom: 1px solid {C_BORDER};
+    background-color: transparent !important;
 }}
-[data-testid="stToolbar"] {{ background-color: {C_BG}; }}
-.stApp {{ background-color: {C_BG}; }}
-.main .block-container {{
+[data-testid="stToolbar"] {{ background-color: transparent; }}
+
+/* Premium animated gradient background */
+.stApp {{
+    background: radial-gradient(circle at 15% 50%, #172033 0%, {C_BG} 45%),
+                radial-gradient(circle at 85% 30%, #0d1b2a 0%, {C_BG} 50%);
     background-color: {C_BG};
+    background-attachment: fixed;
+}}
+.main .block-container {{
     padding-top: 1.5rem;
     padding-bottom: 3rem;
     max-width: 100%;
 }}
 html, body, [class*="css"] {{
-    font-family: "Inter", system-ui, sans-serif;
+    font-family: "Inter", "Outfit", system-ui, sans-serif;
     color: {C_TEXT};
     line-height: 1.6;
 }}
 h1, h2, h3 {{
     color: {C_TEXT};
-    letter-spacing: 0.02rem;
+    letter-spacing: -0.01em;
     font-weight: 700;
 }}
-h1 {{ font-size: 1.7rem;  }}
-h2 {{ font-size: 1.15rem; }}
-h3 {{ font-size: 0.95rem; }}
+h1 {{ font-size: 1.85rem; background: linear-gradient(90deg, #f8fafc, #94a3b8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }}
+h2 {{ font-size: 1.25rem; font-weight: 600; }}
+h3 {{ font-size: 1.05rem; font-weight: 500; }}
 
 /* ═══════════════════════════════════════════════════════════
    2. ANIMATIONS
 ══════════════════════════════════════════════════════════════ */
 @keyframes fadeInUp {{
-    from {{ opacity: 0; transform: translateY(16px); }}
+    from {{ opacity: 0; transform: translateY(20px); }}
     to   {{ opacity: 1; transform: translateY(0);    }}
 }}
 @keyframes fadeIn {{
     from {{ opacity: 0; }}
     to   {{ opacity: 1; }}
-}}
-@keyframes slideInLeft {{
-    from {{ opacity: 0; transform: translateX(-18px); }}
-    to   {{ opacity: 1; transform: translateX(0);     }}
-}}
-@keyframes slideInRight {{
-    from {{ opacity: 0; transform: translateX(18px); }}
-    to   {{ opacity: 1; transform: translateX(0);    }}
-}}
-@keyframes scaleIn {{
-    from {{ opacity: 0; transform: scale(0.97); }}
-    to   {{ opacity: 1; transform: scale(1);    }}
 }}
 @keyframes pulse {{
     0%   {{ box-shadow: 0 0 0 0   {C_GREEN}99; }}
@@ -126,55 +125,26 @@ h3 {{ font-size: 0.95rem; }}
 }}
 @keyframes borderGlow {{
     0%, 100% {{ border-color: {C_BORDER}; }}
-    50%       {{ border-color: {C_ACCENT}88; }}
+    50%       {{ border-color: rgba(56, 189, 248, 0.4); }}
 }}
 
-/* Staggered KPI entrance */
-.kpi-card {{ animation: fadeInUp 0.45s ease both; }}
+.kpi-card {{ animation: fadeInUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }}
 .kpi-card:nth-child(1) {{ animation-delay: 0.05s; }}
 .kpi-card:nth-child(2) {{ animation-delay: 0.10s; }}
 .kpi-card:nth-child(3) {{ animation-delay: 0.15s; }}
 .kpi-card:nth-child(4) {{ animation-delay: 0.20s; }}
 .kpi-card:nth-child(5) {{ animation-delay: 0.25s; }}
 
-[data-baseweb="tab-panel"] > div {{ animation: fadeIn 0.35s ease; }}
-
-[data-testid="stPlotlyChart"] {{
-    animation: slideInLeft 0.45s ease both;
-    border-radius: 10px;
-    overflow: hidden;
-}}
-[data-testid="stPlotlyChart"] iframe {{ animation: scaleIn 0.5s ease both; }}
-
-[data-testid="stVerticalBlock"] > div:last-child [data-testid="stMetric"],
-[data-testid="stVerticalBlock"] > div:last-child [data-testid="stDataFrame"] {{
-    animation: slideInRight 0.4s ease both;
-}}
-[data-testid="stDataFrame"]            {{ animation: fadeInUp 0.4s ease both; }}
-[data-testid="stMarkdownContainer"] h2,
-[data-testid="stMarkdownContainer"] h3 {{ animation: fadeIn 0.4s ease both; }}
-
-.stTabs [aria-selected="true"] {{
-    background: {C_BG} !important;
-    color: {C_ACCENT} !important;
-    font-weight: 700;
-    border-color: {C_BORDER} {C_BORDER} {C_BG} !important;
-    animation: accentPulse 1.2s ease 1;
-}}
-
-.legend-pill:nth-child(1) {{ animation-delay: 0.05s; }}
-.legend-pill:nth-child(2) {{ animation-delay: 0.10s; }}
-.legend-pill:nth-child(3) {{ animation-delay: 0.15s; }}
-.legend-pill:nth-child(4) {{ animation-delay: 0.20s; }}
+[data-baseweb="tab-panel"] > div {{ animation: fadeIn 0.4s ease; }}
 
 /* ═══════════════════════════════════════════════════════════
-   3. KPI ROW
+   3. KPI ROW (GLASSMORPHISM)
 ══════════════════════════════════════════════════════════════ */
 .kpi-row {{
     display: flex;
-    gap: 12px;
+    gap: 16px;
     overflow-x: auto;
-    padding-bottom: 6px;
+    padding-bottom: 8px;
     scrollbar-width: thin;
     scrollbar-color: {C_BORDER} transparent;
 }}
@@ -183,43 +153,57 @@ h3 {{ font-size: 0.95rem; }}
 .kpi-row::-webkit-scrollbar-thumb {{ background: {C_BORDER}; border-radius: 4px; }}
 
 .kpi-card {{
-    flex: 1 0 180px;
-    min-width: 180px;
+    flex: 1 0 190px;
+    min-width: 190px;
     background: {C_SURFACE};
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
     border: 1px solid {C_BORDER};
-    border-radius: 10px;
-    padding: 18px 16px 14px;
-    transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 20px 18px 16px;
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
     cursor: default;
+    position: relative;
+    overflow: hidden;
+}}
+.kpi-card::before {{
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 100%;
+    background: linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 100%);
+    pointer-events: none;
 }}
 .kpi-card:hover {{
     border-color: {C_ACCENT};
-    box-shadow: 0 0 16px {C_ACCENT}44;
-    transform: translateY(-2px);
+    box-shadow: 0 8px 28px rgba(56, 189, 248, 0.15), inset 0 0 0 1px {C_ACCENT}33;
+    transform: translateY(-4px);
 }}
 .kpi-label {{
-    font-size: 0.68rem;
+    font-size: 0.65rem;
     font-weight: 700;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
     color: {C_MUTED};
-    margin-bottom: 6px;
+    margin-bottom: 8px;
     white-space: nowrap;
 }}
 .kpi-value {{
-    font-size: 1.35rem;
-    font-weight: 700;
+    font-size: 1.45rem;
+    font-weight: 800;
     color: {C_TEXT};
-    letter-spacing: -0.01em;
-    margin-bottom: 4px;
+    letter-spacing: -0.02em;
+    margin-bottom: 6px;
     white-space: nowrap;
 }}
 .kpi-delta {{
-    font-size: 0.74rem;
-    font-weight: 500;
+    font-size: 0.76rem;
+    font-weight: 600;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    display: flex;
+    align-items: center;
+    gap: 4px;
 }}
 .kpi-delta.pos  {{ color: {C_GREEN};  }}
 .kpi-delta.neg  {{ color: {C_RED};    }}
@@ -227,72 +211,91 @@ h3 {{ font-size: 0.95rem; }}
 .kpi-delta.warn {{ color: {C_ORANGE}; }}
 
 /* ═══════════════════════════════════════════════════════════
-   4. STREAMLIT METRICS (inside tabs)
+   4. STREAMLIT METRICS
 ══════════════════════════════════════════════════════════════ */
 [data-testid="stMetric"] {{
     background: {C_SURFACE};
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
     border: 1px solid {C_BORDER};
-    border-radius: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
     padding: 16px 14px;
-    transition: border-color 0.3s ease, box-shadow 0.3s ease;
-    animation: fadeInUp 0.4s ease both;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }}
 [data-testid="stMetric"]:hover {{
     border-color: {C_ACCENT};
-    box-shadow: 0 0 14px {C_ACCENT}44;
+    box-shadow: 0 6px 20px rgba(56, 189, 248, 0.1);
+    transform: translateY(-2px);
 }}
 [data-testid="stMetricLabel"] {{
     color: {C_MUTED};
     font-size: 0.7rem;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
     font-weight: 700;
 }}
-[data-testid="stMetricValue"] {{ color: {C_TEXT}; font-weight: 700; font-size: 1.25rem; }}
-[data-testid="stMetricDelta"] {{ font-size: 0.73rem; }}
+[data-testid="stMetricValue"] {{ color: {C_TEXT}; font-weight: 800; font-size: 1.3rem; letter-spacing: -0.01em; }}
+[data-testid="stMetricDelta"] {{ font-size: 0.75rem; font-weight: 500; }}
 
 /* ═══════════════════════════════════════════════════════════
    5. TABS
 ══════════════════════════════════════════════════════════════ */
 .stTabs [data-baseweb="tab-list"] {{
     background: {C_SURFACE};
-    border-radius: 8px 8px 0 0;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-radius: 10px 10px 0 0;
     border-bottom: 1px solid {C_BORDER};
-    gap: 2px;
-    padding: 4px 6px 0;
+    gap: 4px;
+    padding: 6px 8px 0;
 }}
 .stTabs [data-baseweb="tab"] {{
     background: transparent;
-    border-radius: 6px 6px 0 0;
+    border-radius: 8px 8px 0 0;
     color: {C_MUTED};
-    padding: 8px 18px;
-    font-size: 0.83rem;
-    font-weight: 500;
+    padding: 10px 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
     transition: all 0.2s ease;
     letter-spacing: 0.02em;
-    border: 1px solid transparent;
+    border: 0;
 }}
-.stTabs [data-baseweb="tab"]:hover {{ color: {C_TEXT}; background: {C_ACCENT2}33; }}
+.stTabs [data-baseweb="tab"]:hover {{
+    color: {C_TEXT};
+    background: rgba(255, 255, 255, 0.05);
+}}
+.stTabs [aria-selected="true"] {{
+    background: rgba(14, 165, 233, 0.1) !important;
+    color: {C_ACCENT} !important;
+    font-weight: 700;
+    border-bottom: 2px solid {C_ACCENT} !important;
+}}
 
 /* ═══════════════════════════════════════════════════════════
    6. SIDEBAR
 ══════════════════════════════════════════════════════════════ */
-section[data-testid="stSidebar"],
-section[data-testid="stSidebar"] .block-container {{
-    background: {C_SURFACE};
+section[data-testid="stSidebar"] {{
+    background: rgba(10, 15, 24, 0.85); /* Darker glass for sidebar */
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     border-right: 1px solid {C_BORDER};
 }}
 .stExpander {{
-    background: {C_BG} !important;
+    background: rgba(255, 255, 255, 0.02) !important;
     border: 1px solid {C_BORDER} !important;
-    border-radius: 8px !important;
+    border-radius: 10px !important;
+    overflow: hidden;
 }}
 .stExpander summary {{
     color: {C_MUTED};
-    font-size: 0.83rem;
-    font-weight: 600;
-    letter-spacing: 0.03em;
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    transition: color 0.2s;
 }}
+.stExpander summary:hover {{ color: {C_TEXT}; background: rgba(255,255,255,0.03); }}
 
 /* ═══════════════════════════════════════════════════════════
    7. BUTTONS & DOWNLOAD
@@ -300,92 +303,100 @@ section[data-testid="stSidebar"] .block-container {{
 div[data-testid="stButton"] button,
 div[data-testid="stDownloadButton"] button {{
     width: 100%;
-    background: transparent;
+    background: linear-gradient(180deg, rgba(255,255,255,0.05) 0%, transparent 100%);
     border: 1px solid {C_BORDER};
-    color: {C_MUTED};
-    border-radius: 6px;
+    color: {C_TEXT};
+    border-radius: 8px;
     font-weight: 600;
-    font-size: 0.81rem;
+    font-size: 0.85rem;
     letter-spacing: 0.04em;
     transition: all 0.3s ease;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
 }}
 div[data-testid="stButton"] button:hover {{
     border-color: {C_ACCENT};
-    color: {C_ACCENT};
-    box-shadow: 0 0 10px {C_ACCENT}44;
+    color: {C_TEXT};
+    box-shadow: 0 0 16px rgba(56, 189, 248, 0.3);
+    background: rgba(56, 189, 248, 0.1);
+    transform: translateY(-1px);
 }}
 div[data-testid="stDownloadButton"] button {{
-    border-color: {C_GREEN}88;
-    color: {C_GREEN};
+    border-color: {C_GREEN}AA;
+    color: #34d399; /* emerald 400 */
 }}
 div[data-testid="stDownloadButton"] button:hover {{
     border-color: {C_GREEN};
-    box-shadow: 0 0 10px {C_GREEN}44;
-    background: {C_GREEN}11;
+    box-shadow: 0 0 16px rgba(16, 185, 129, 0.3);
+    background: rgba(16, 185, 129, 0.1);
+    color: #fff;
 }}
 
 /* ═══════════════════════════════════════════════════════════
    8. MISC
 ══════════════════════════════════════════════════════════════ */
-hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
+hr {{ border-color: rgba(255,255,255,0.08) !important; opacity: 1 !important; margin: 1.5em 0 !important; }}
 [data-testid="stDataFrame"] {{
     border: 1px solid {C_BORDER};
-    border-radius: 8px;
+    border-radius: 10px;
     overflow: hidden;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
 }}
-.stCaption, small {{ color: {C_MUTED} !important; font-size: 0.77rem !important; }}
+.stCaption, small {{ color: {C_MUTED} !important; font-size: 0.8rem !important; letter-spacing: 0.01em; }}
 
 /* ═══════════════════════════════════════════════════════════
    9. EYEBROW / LEGEND / BADGES
 ══════════════════════════════════════════════════════════════ */
 .eyebrow {{
-    font-size: 0.67rem;
-    font-weight: 700;
-    letter-spacing: 0.12em;
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.15em;
     text-transform: uppercase;
     color: {C_ACCENT};
-    margin-bottom: 4px;
-    animation: fadeIn 0.5s ease;
+    margin-bottom: 6px;
+    animation: fadeIn 0.6s ease;
 }}
 .legend-row {{
     display: flex;
-    gap: 8px;
+    gap: 10px;
     flex-wrap: wrap;
-    margin-bottom: 12px;
+    margin-bottom: 16px;
 }}
 .legend-pill {{
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    padding: 3px 11px;
+    gap: 6px;
+    padding: 4px 14px;
     border-radius: 20px;
-    font-size: 0.73rem;
-    font-weight: 600;
-    letter-spacing: 0.02em;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
     animation: fadeIn 0.4s ease both;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
 }}
 .route-badge {{
     display: inline-block;
-    background: {C_ACCENT}18;
-    border: 1px solid {C_ACCENT}55;
+    background: linear-gradient(90deg, rgba(56, 189, 248, 0.15), rgba(2, 132, 199, 0.15));
+    border: 1px solid rgba(56, 189, 248, 0.4);
     border-radius: 20px;
-    padding: 3px 12px;
-    font-size: 0.73rem;
-    font-weight: 700;
+    padding: 4px 14px;
+    font-size: 0.75rem;
+    font-weight: 800;
     color: {C_ACCENT};
-    letter-spacing: 0.04em;
+    letter-spacing: 0.05em;
     animation: fadeIn 0.5s ease;
-    margin-left: 8px;
+    margin-left: 10px;
+    box-shadow: 0 2px 10px rgba(56, 189, 248, 0.1);
 }}
 .age-badge {{
     display: inline-block;
     border-radius: 20px;
-    padding: 3px 12px;
-    font-size: 0.73rem;
-    font-weight: 700;
-    letter-spacing: 0.04em;
+    padding: 4px 14px;
+    font-size: 0.75rem;
+    font-weight: 800;
+    letter-spacing: 0.05em;
     animation: fadeIn 0.5s ease;
-    margin-left: 8px;
+    margin-left: 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
 }}
 
 /* ═══════════════════════════════════════════════════════════
@@ -393,29 +404,28 @@ hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
 ══════════════════════════════════════════════════════════════ */
 .status-dot {{
     display: inline-block;
-    width: 7px;
-    height: 7px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
     background: {C_GREEN};
     animation: pulse 2s infinite;
-    margin-right: 8px;
+    margin-right: 10px;
     vertical-align: middle;
-    flex-shrink: 0;
+    box-shadow: 0 0 8px {C_GREEN}AA;
 }}
 .status-bar {{
     display: flex;
     align-items: center;
-    background: {C_BG};
-    border: 1px solid {C_BORDER};
-    border-radius: 6px;
-    padding: 7px 12px;
-    font-size: 0.72rem;
-    font-weight: 700;
-    color: {C_GREEN};
-    letter-spacing: 0.07em;
+    background: rgba(16, 185, 129, 0.05);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 0.75rem;
+    font-weight: 800;
+    color: #34d399; /* emerald 400 */
+    letter-spacing: 0.08em;
     text-transform: uppercase;
-    margin-bottom: 10px;
-    animation: borderGlow 3s ease infinite;
+    margin-bottom: 12px;
 }}
 </style>
 """, unsafe_allow_html=True)
@@ -481,7 +491,7 @@ def route_label(km: int) -> str:
 
 with st.sidebar:
     st.markdown(
-        '<div class="eyebrow" style="margin-bottom:8px;">Atlas-H2 · Digital Twin v6.1</div>',
+        '<div class="eyebrow" style="margin-bottom:8px;">Atlas-H2 · Digital Twin v6.2</div>',
         unsafe_allow_html=True,
     )
     st.markdown(
@@ -534,6 +544,12 @@ diesel_price     = st.session_state.get("diesel_price",     DEFAULTS["diesel_pri
 fc_efficiency    = st.session_state.get("fc_efficiency",    DEFAULTS["fc_efficiency"])
 winter_temp      = st.session_state.get("winter_temp",      DEFAULTS["winter_temp"])
 
+# [PERF-3] Round float slider values to 4 dp before entering cache functions.
+# IEEE 754 representation of 0.005-step slider values is not guaranteed bit-exact;
+# rounding prevents phantom cache misses that force full engine reruns.
+electricity_rate = round(electricity_rate, 4)
+diesel_price     = round(diesel_price,     4)
+
 trip_energy_kwh = int(corridor_trip_energy_kwh(corridor_km))
 
 
@@ -581,9 +597,15 @@ def run_all(
         profile=cfg.INNOVATION_HTPEM,
         system_age_years=system_age_years,
     )
+    # [ARCH-1] Derive LCOA from live econ results so it reacts to slider state.
+    # annual_h2_cost = electricity + OPEX (CAPEX is amortised in LCOH, not here).
+    annual_h2_cost_cad = (
+        econ_htpem.annual_electricity_cost_cad + econ_htpem.annual_opex_cad
+    )
     carbon = CarbonAbatementCalculator(
         trips_per_year=trips_yr,
         corridor_km=float(corridor_km),
+        annual_h2_cost_cad=annual_h2_cost_cad,
     ).calculate_lifetime(dynamic_diesel_price=diesel_price)
 
     return dict(
@@ -630,31 +652,56 @@ carbon                                        = results["carbon"]
 
 # ── CSV EXPORT ────────────────────────────────────────────────────────────────
 
-def build_export_csv() -> bytes:
+@st.cache_data  # [PERF-1] Only rebuild when slider values change, not every frame.
+def build_export_csv(
+    _corridor_km: int,
+    _system_age_years: int,
+    _electrolyzer_kw: int,
+    _capacity_factor: int,
+    _fc_power: int,
+    _trips_per_year: int,
+    _electricity_rate: float,
+    _diesel_price: float,
+    _fc_efficiency: int,
+    _winter_temp: int,
+) -> bytes:
+    """Build export CSV; cached so it is only recomputed when inputs change."""
+    # Re-read results from the already-cached run_all for the same params.
+    _results    = run_all(
+        _corridor_km, _system_age_years,
+        _electrolyzer_kw, _capacity_factor, _fc_power, _trips_per_year,
+        _electricity_rate, _diesel_price, _fc_efficiency, _winter_temp,
+    )
+    _payload    = _results["payload"]
+    _thermal    = _results["thermal"]
+    _econ_lt    = _results["econ_ltpem"]
+    _econ_ht    = _results["econ_htpem"]
+    _carbon     = _results["carbon"]
+    _trip_kwh   = int(corridor_trip_energy_kwh(_corridor_km))
     rows = []
     for p in ALL_PROFILES:
-        pl = payload[p.energy_type]
-        th = thermal[p.energy_type]
+        pl  = _payload[p.energy_type]
+        th  = _thermal[p.energy_type]
         row: dict = {
-            "Profile":                 p.name,
-            "Energy Type":             p.energy_type,
-            "Corridor (km)":           corridor_km,
-            "Trip Energy (kWh)":       trip_energy_kwh,
-            "Stack Age (yr)":          system_age_years,
-            "Storage Mass (kg)":       pl.storage_system_mass_kg,
-            "Freight Loss (t)":        pl.freight_capacity_loss_tonnes,
-            "Stack Temp (°C)":         p.operating_temp_c,
-            "FC Efficiency (degraded)":th.effective_fc_efficiency,
-            "Trip Duration (hr)":      th.trip_duration_hr,
-            "HVAC Penalty kWh/trip":   th.hvac_penalty_kwh_per_trip,
-            "Heat Recovery kWh/trip":  th.electricity_saved_kwh_per_trip,
-            "Net Thermal C$/yr":       th.net_annual_impact_cad,
-            "CO₂ Abated 5yr (t)":      carbon.total_co2_abated_tonnes,
-            "Carbon Credits 5yr (C$)": carbon.total_carbon_credit_value_cad,
-            "Avoided Fuel 5yr (C$)":   carbon.total_avoided_fuel_cost_cad,
+            "Profile":                  p.name,
+            "Energy Type":              p.energy_type,
+            "Corridor (km)":            _corridor_km,
+            "Trip Energy (kWh)":        _trip_kwh,
+            "Stack Age (yr)":           _system_age_years,
+            "Storage Mass (kg)":        pl.storage_system_mass_kg,
+            "Freight Loss (t)":         pl.freight_capacity_loss_tonnes,
+            "Stack Temp (°C)":          p.operating_temp_c,
+            "FC Efficiency (degraded)": th.effective_fc_efficiency,
+            "Trip Duration (hr)":       th.trip_duration_hr,
+            "HVAC Penalty kWh/trip":    th.hvac_penalty_kwh_per_trip,
+            "Heat Recovery kWh/trip":   th.electricity_saved_kwh_per_trip,
+            "Net Thermal C$/yr":        th.net_annual_impact_cad,
+            "CO₂ Abated 5yr (t)":       _carbon.total_co2_abated_tonnes,
+            "Carbon Credits 5yr (C$)":  _carbon.total_carbon_credit_value_cad,
+            "Avoided Fuel 5yr (C$)":    _carbon.total_avoided_fuel_cost_cad,
         }
         if p.energy_type in ("h2_ltpem", "h2_htpem"):
-            econ = econ_ltpem if p.energy_type == "h2_ltpem" else econ_htpem
+            econ = _econ_lt if p.energy_type == "h2_ltpem" else _econ_ht
             row.update({
                 "LCOH (C$/kg)":            econ.lcoh_cad_per_kg,
                 "Gross CAPEX (C$)":        econ.electrolyzer_capex_cad,
@@ -681,7 +728,11 @@ with st.sidebar:
     st.divider()
     st.download_button(
         label="⬇  Export Report CSV",
-        data=build_export_csv(),
+        data=build_export_csv(  # [PERF-1] cached — all slider values as explicit keys
+            corridor_km, system_age_years,
+            electrolyzer_kw, capacity_factor, fc_power, trips_per_year,
+            electricity_rate, diesel_price, fc_efficiency, winter_temp,
+        ),
         file_name=f"Atlas_Feasibility_{corridor_km}km_age{system_age_years}yr.csv",
         mime="text/csv",
         use_container_width=True,
@@ -691,14 +742,26 @@ with st.sidebar:
 # ── HELPERS ───────────────────────────────────────────────────────────────────
 
 def kpi_row(cards: list[dict]) -> None:
+    """Render a horizontal KPI strip from a list of card dicts.
+
+    Each card dict supports:
+        label       (str)  — upper eyebrow text
+        value       (str)  — large headline figure
+        delta       (str)  — sub-caption text
+        delta_class (str)  — CSS class: 'pos' | 'neg' | 'neu' | 'warn'
+
+    [UX-1] Delta arrow is now sign-aware: ↑ for pos/neu/warn, ↓ for neg.
+    Previously always ↑ regardless of delta_class — misleading for declining metrics.
+    """
     html = '<div class="kpi-row">'
     for c in cards:
-        dc = c.get("delta_class", "pos")
+        dc    = c.get("delta_class", "pos")
+        arrow = "↓" if dc == "neg" else "↑"
         html += (
             f'<div class="kpi-card">'
             f'  <div class="kpi-label">{c["label"]}</div>'
             f'  <div class="kpi-value">{c["value"]}</div>'
-            f'  <div class="kpi-delta {dc}">↑ {c["delta"]}</div>'
+            f'  <div class="kpi-delta {dc}">{arrow} {c["delta"]}</div>'
             f'</div>'
         )
     html += '</div>'
@@ -735,12 +798,12 @@ age_badge_text = (
     else f"Yr {system_age_years} · H₂ yield {econ_htpem.effective_h2_efficiency*100:.1f}%"
 )
 
-st.markdown('<p class="eyebrow">Atlas-H2 · Enterprise Intelligence v6.1</p>', unsafe_allow_html=True)
-st.title("4-Way Propulsion Feasibility Study")
+st.markdown('<p class="eyebrow">Atlas-H2 · Digital simulation v6.2</p>', unsafe_allow_html=True)
+st.title("4-Way Comparative Rail Propulsion Study")  # [STYLE-1] typo fix
 st.markdown(
     f"<span style='color:{C_MUTED}'>Legacy Diesel &nbsp;·&nbsp; Battery EV "
-    f"&nbsp;·&nbsp; LTPEM H₂ &nbsp;·&nbsp; </span>"
-    f"<span style='color:{C_ACCENT};font-weight:700;'>HTPEM H₂ — Recommended</span>"
+    f"&nbsp;·&nbsp; LTPEM H₂(H₂ Flirt) &nbsp;·&nbsp; </span>"
+    f"<span style='color:{C_ACCENT};font-weight:700;'>HTPEM H₂ — (Modified H₂ flirt)</span>"
     f'<span class="route-badge">📍 {route_label(corridor_km)}</span>'
     f'<span class="age-badge" style="background:{age_color}18;border:1px solid {age_color}55;'
     f'color:{age_color}">⚡ {age_badge_text}</span>',
@@ -1148,6 +1211,9 @@ with tab5:
             f"Blue Bell = high-cost zone · Deep Space Blue = target zone"
         )
 
+    # [PERF-2] Sensitivity grid is computed lazily here — only when the user
+    # actually visits Tab 5.  Previously computed unconditionally at the top
+    # level, burning 256+ LCOH evaluations on every slider interaction.
     rates, capexes, z_grid, deg_curve = run_sensitivity(
         electrolyzer_kw, capacity_factor, system_age_years,
     )

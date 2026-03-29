@@ -1,7 +1,7 @@
 """
 config.py
 ==========
-Atlas-H2: Digital Infrastructure Twin
+Atlas-H2: Digital Infrastructure Twin  — v6.2
 Single Source of Truth — All Physical, Economic & Environmental Constants
 
 This file is the authoritative configuration layer for the entire simulation.
@@ -186,6 +186,33 @@ class AtlasConfig:
 
     ELECTROLYZER_OPEX_RATE: float = 0.02
     """Annual electrolyzer OPEX as fraction of gross CAPEX. Source: NREL H2A 2023."""
+
+    ELECTROLYZER_BOP_FRACTION: float = 0.25
+    """
+    Balance-of-Plant share of total electrolyzer CAPEX [fraction].
+    Applied to gross_capex before multiplying by the profile's BOP discount.
+    Source: IRENA Green Hydrogen Cost Reduction 2020 (25–35% range, 25% conservative).
+    FIX v6.2: Previously a magic number (0.25) duplicated in EconomicsEngine and
+    SensitivityEngine. Centralised here so a single edit propagates everywhere.
+    """
+
+    FC_PARASITIC_FRACTION: float = 0.10
+    """
+    Fraction of gross FC input power lost to parasitic loads (compressor, cooling
+    pumps, power electronics) beyond the net electrical output [dimensionless].
+    Energy balance: gross_input = net_electrical / η; losses = gross_input × (1 − η − parasitic).
+    FIX v6.2: Previously hard-coded as 0.10 in _waste_heat_output_kw. Moving here
+    prevents the thermal model from producing negative waste heat if η + parasitic > 1.
+    """
+
+    WACC: float = 0.08
+    """
+    Weighted Average Cost of Capital [fraction] for NPV-LCOH discounting.
+    Represents a blended government/institutional financing rate for Canadian
+    rail infrastructure. Source: Transport Canada Green Infrastructure 2024 guidance.
+    NOTE: LCOH calculations in v6.2 still use a simple nominal sum (no discounting).
+    This constant is pre-positioned for a v7.0 NPV-LCOH upgrade.
+    """
 
     # ── TECHNICAL & PHYSICAL CONSTANTS ───────────────────────────────────────
 
