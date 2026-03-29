@@ -53,65 +53,72 @@ st.set_page_config(
 
 # ── PALETTE ───────────────────────────────────────────────────────────────────
 
-C_BG      = "#0a0f18"                # Deep cyber dark
-C_SURFACE = "rgba(15, 23, 42, 0.55)" # Glassmorphic panel
-C_BORDER  = "rgba(56, 189, 248, 0.15)"
-C_ACCENT2 = "#0ea5e9"
-C_ACCENT  = "#38bdf8"
-C_TEXT    = "#f8fafc"
-C_MUTED   = "#94a3b8"
-C_GREEN   = "#10b981"
-C_RED     = "#ef4444"
-C_ORANGE  = "#f59e0b"
+C_BG      = "#13293D"
+C_SURFACE = "#16324F"
+C_BORDER  = "#18435A"
+C_ACCENT2 = "#2A628F"
+C_ACCENT  = "#3E92CC"
+C_TEXT    = "#E2E8F0"
+C_MUTED   = "#7A9BB5"
+C_GREEN   = "#22c55e"
+C_RED     = "#f87171"
+C_ORANGE  = "#fb923c"
 
 # ── GLOBAL CSS ────────────────────────────────────────────────────────────────
 
 st.markdown(f"""
 <style>
 /* ═══════════════════════════════════════════════════════════
-   1. RESET, CHROME & BACKGROUND
+   1. RESET & CHROME
 ══════════════════════════════════════════════════════════════ */
 header[data-testid="stHeader"] {{
-    background-color: transparent !important;
-}}
-[data-testid="stToolbar"] {{ background-color: transparent; }}
-
-/* Premium animated gradient background */
-.stApp {{
-    background: radial-gradient(circle at 15% 50%, #172033 0%, {C_BG} 45%),
-                radial-gradient(circle at 85% 30%, #0d1b2a 0%, {C_BG} 50%);
     background-color: {C_BG};
-    background-attachment: fixed;
+    border-bottom: 1px solid {C_BORDER};
 }}
+[data-testid="stToolbar"] {{ background-color: {C_BG}; }}
+.stApp {{ background-color: {C_BG}; }}
 .main .block-container {{
+    background-color: {C_BG};
     padding-top: 1.5rem;
     padding-bottom: 3rem;
     max-width: 100%;
 }}
 html, body, [class*="css"] {{
-    font-family: "Inter", "Outfit", system-ui, sans-serif;
+    font-family: "Inter", system-ui, sans-serif;
     color: {C_TEXT};
     line-height: 1.6;
 }}
 h1, h2, h3 {{
     color: {C_TEXT};
-    letter-spacing: -0.01em;
+    letter-spacing: 0.02rem;
     font-weight: 700;
 }}
-h1 {{ font-size: 1.85rem; background: linear-gradient(90deg, #f8fafc, #94a3b8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }}
-h2 {{ font-size: 1.25rem; font-weight: 600; }}
-h3 {{ font-size: 1.05rem; font-weight: 500; }}
+h1 {{ font-size: 1.7rem;  }}
+h2 {{ font-size: 1.15rem; }}
+h3 {{ font-size: 0.95rem; }}
 
 /* ═══════════════════════════════════════════════════════════
    2. ANIMATIONS
 ══════════════════════════════════════════════════════════════ */
 @keyframes fadeInUp {{
-    from {{ opacity: 0; transform: translateY(20px); }}
+    from {{ opacity: 0; transform: translateY(16px); }}
     to   {{ opacity: 1; transform: translateY(0);    }}
 }}
 @keyframes fadeIn {{
     from {{ opacity: 0; }}
     to   {{ opacity: 1; }}
+}}
+@keyframes slideInLeft {{
+    from {{ opacity: 0; transform: translateX(-18px); }}
+    to   {{ opacity: 1; transform: translateX(0);     }}
+}}
+@keyframes slideInRight {{
+    from {{ opacity: 0; transform: translateX(18px); }}
+    to   {{ opacity: 1; transform: translateX(0);    }}
+}}
+@keyframes scaleIn {{
+    from {{ opacity: 0; transform: scale(0.97); }}
+    to   {{ opacity: 1; transform: scale(1);    }}
 }}
 @keyframes pulse {{
     0%   {{ box-shadow: 0 0 0 0   {C_GREEN}99; }}
@@ -125,26 +132,55 @@ h3 {{ font-size: 1.05rem; font-weight: 500; }}
 }}
 @keyframes borderGlow {{
     0%, 100% {{ border-color: {C_BORDER}; }}
-    50%       {{ border-color: rgba(56, 189, 248, 0.4); }}
+    50%       {{ border-color: {C_ACCENT}88; }}
 }}
 
-.kpi-card {{ animation: fadeInUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }}
+/* Staggered KPI entrance */
+.kpi-card {{ animation: fadeInUp 0.45s ease both; }}
 .kpi-card:nth-child(1) {{ animation-delay: 0.05s; }}
 .kpi-card:nth-child(2) {{ animation-delay: 0.10s; }}
 .kpi-card:nth-child(3) {{ animation-delay: 0.15s; }}
 .kpi-card:nth-child(4) {{ animation-delay: 0.20s; }}
 .kpi-card:nth-child(5) {{ animation-delay: 0.25s; }}
 
-[data-baseweb="tab-panel"] > div {{ animation: fadeIn 0.4s ease; }}
+[data-baseweb="tab-panel"] > div {{ animation: fadeIn 0.35s ease; }}
+
+[data-testid="stPlotlyChart"] {{
+    animation: slideInLeft 0.45s ease both;
+    border-radius: 10px;
+    overflow: hidden;
+}}
+[data-testid="stPlotlyChart"] iframe {{ animation: scaleIn 0.5s ease both; }}
+
+[data-testid="stVerticalBlock"] > div:last-child [data-testid="stMetric"],
+[data-testid="stVerticalBlock"] > div:last-child [data-testid="stDataFrame"] {{
+    animation: slideInRight 0.4s ease both;
+}}
+[data-testid="stDataFrame"]            {{ animation: fadeInUp 0.4s ease both; }}
+[data-testid="stMarkdownContainer"] h2,
+[data-testid="stMarkdownContainer"] h3 {{ animation: fadeIn 0.4s ease both; }}
+
+.stTabs [aria-selected="true"] {{
+    background: {C_BG} !important;
+    color: {C_ACCENT} !important;
+    font-weight: 700;
+    border-color: {C_BORDER} {C_BORDER} {C_BG} !important;
+    animation: accentPulse 1.2s ease 1;
+}}
+
+.legend-pill:nth-child(1) {{ animation-delay: 0.05s; }}
+.legend-pill:nth-child(2) {{ animation-delay: 0.10s; }}
+.legend-pill:nth-child(3) {{ animation-delay: 0.15s; }}
+.legend-pill:nth-child(4) {{ animation-delay: 0.20s; }}
 
 /* ═══════════════════════════════════════════════════════════
-   3. KPI ROW (GLASSMORPHISM)
+   3. KPI ROW
 ══════════════════════════════════════════════════════════════ */
 .kpi-row {{
     display: flex;
-    gap: 16px;
+    gap: 12px;
     overflow-x: auto;
-    padding-bottom: 8px;
+    padding-bottom: 6px;
     scrollbar-width: thin;
     scrollbar-color: {C_BORDER} transparent;
 }}
@@ -153,57 +189,43 @@ h3 {{ font-size: 1.05rem; font-weight: 500; }}
 .kpi-row::-webkit-scrollbar-thumb {{ background: {C_BORDER}; border-radius: 4px; }}
 
 .kpi-card {{
-    flex: 1 0 190px;
-    min-width: 190px;
+    flex: 1 0 180px;
+    min-width: 180px;
     background: {C_SURFACE};
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
     border: 1px solid {C_BORDER};
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
-    padding: 20px 18px 16px;
-    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    border-radius: 10px;
+    padding: 18px 16px 14px;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
     cursor: default;
-    position: relative;
-    overflow: hidden;
-}}
-.kpi-card::before {{
-    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 100%;
-    background: linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 100%);
-    pointer-events: none;
 }}
 .kpi-card:hover {{
     border-color: {C_ACCENT};
-    box-shadow: 0 8px 28px rgba(56, 189, 248, 0.15), inset 0 0 0 1px {C_ACCENT}33;
-    transform: translateY(-4px);
+    box-shadow: 0 0 16px {C_ACCENT}44;
+    transform: translateY(-2px);
 }}
 .kpi-label {{
-    font-size: 0.65rem;
+    font-size: 0.68rem;
     font-weight: 700;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
     color: {C_MUTED};
-    margin-bottom: 8px;
-    white-space: nowrap;
-}}
-.kpi-value {{
-    font-size: 1.45rem;
-    font-weight: 800;
-    color: {C_TEXT};
-    letter-spacing: -0.02em;
     margin-bottom: 6px;
     white-space: nowrap;
 }}
+.kpi-value {{
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: {C_TEXT};
+    letter-spacing: -0.01em;
+    margin-bottom: 4px;
+    white-space: nowrap;
+}}
 .kpi-delta {{
-    font-size: 0.76rem;
-    font-weight: 600;
+    font-size: 0.74rem;
+    font-weight: 500;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    display: flex;
-    align-items: center;
-    gap: 4px;
 }}
 .kpi-delta.pos  {{ color: {C_GREEN};  }}
 .kpi-delta.neg  {{ color: {C_RED};    }}
@@ -211,91 +233,72 @@ h3 {{ font-size: 1.05rem; font-weight: 500; }}
 .kpi-delta.warn {{ color: {C_ORANGE}; }}
 
 /* ═══════════════════════════════════════════════════════════
-   4. STREAMLIT METRICS
+   4. STREAMLIT METRICS (inside tabs)
 ══════════════════════════════════════════════════════════════ */
 [data-testid="stMetric"] {{
     background: {C_SURFACE};
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
     border: 1px solid {C_BORDER};
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
+    border-radius: 10px;
     padding: 16px 14px;
-    transition: all 0.3s ease;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+    animation: fadeInUp 0.4s ease both;
 }}
 [data-testid="stMetric"]:hover {{
     border-color: {C_ACCENT};
-    box-shadow: 0 6px 20px rgba(56, 189, 248, 0.1);
-    transform: translateY(-2px);
+    box-shadow: 0 0 14px {C_ACCENT}44;
 }}
 [data-testid="stMetricLabel"] {{
     color: {C_MUTED};
     font-size: 0.7rem;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
     font-weight: 700;
 }}
-[data-testid="stMetricValue"] {{ color: {C_TEXT}; font-weight: 800; font-size: 1.3rem; letter-spacing: -0.01em; }}
-[data-testid="stMetricDelta"] {{ font-size: 0.75rem; font-weight: 500; }}
+[data-testid="stMetricValue"] {{ color: {C_TEXT}; font-weight: 700; font-size: 1.25rem; }}
+[data-testid="stMetricDelta"] {{ font-size: 0.73rem; }}
 
 /* ═══════════════════════════════════════════════════════════
    5. TABS
 ══════════════════════════════════════════════════════════════ */
 .stTabs [data-baseweb="tab-list"] {{
     background: {C_SURFACE};
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border-radius: 10px 10px 0 0;
+    border-radius: 8px 8px 0 0;
     border-bottom: 1px solid {C_BORDER};
-    gap: 4px;
-    padding: 6px 8px 0;
+    gap: 2px;
+    padding: 4px 6px 0;
 }}
 .stTabs [data-baseweb="tab"] {{
     background: transparent;
-    border-radius: 8px 8px 0 0;
+    border-radius: 6px 6px 0 0;
     color: {C_MUTED};
-    padding: 10px 20px;
-    font-size: 0.85rem;
-    font-weight: 600;
+    padding: 8px 18px;
+    font-size: 0.83rem;
+    font-weight: 500;
     transition: all 0.2s ease;
     letter-spacing: 0.02em;
-    border: 0;
+    border: 1px solid transparent;
 }}
-.stTabs [data-baseweb="tab"]:hover {{
-    color: {C_TEXT};
-    background: rgba(255, 255, 255, 0.05);
-}}
-.stTabs [aria-selected="true"] {{
-    background: rgba(14, 165, 233, 0.1) !important;
-    color: {C_ACCENT} !important;
-    font-weight: 700;
-    border-bottom: 2px solid {C_ACCENT} !important;
-}}
+.stTabs [data-baseweb="tab"]:hover {{ color: {C_TEXT}; background: {C_ACCENT2}33; }}
 
 /* ═══════════════════════════════════════════════════════════
    6. SIDEBAR
 ══════════════════════════════════════════════════════════════ */
-section[data-testid="stSidebar"] {{
-    background: rgba(10, 15, 24, 0.85); /* Darker glass for sidebar */
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+section[data-testid="stSidebar"],
+section[data-testid="stSidebar"] .block-container {{
+    background: {C_SURFACE};
     border-right: 1px solid {C_BORDER};
 }}
 .stExpander {{
-    background: rgba(255, 255, 255, 0.02) !important;
+    background: {C_BG} !important;
     border: 1px solid {C_BORDER} !important;
-    border-radius: 10px !important;
-    overflow: hidden;
+    border-radius: 8px !important;
 }}
 .stExpander summary {{
     color: {C_MUTED};
-    font-size: 0.85rem;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    transition: color 0.2s;
+    font-size: 0.83rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
 }}
-.stExpander summary:hover {{ color: {C_TEXT}; background: rgba(255,255,255,0.03); }}
 
 /* ═══════════════════════════════════════════════════════════
    7. BUTTONS & DOWNLOAD
@@ -303,100 +306,92 @@ section[data-testid="stSidebar"] {{
 div[data-testid="stButton"] button,
 div[data-testid="stDownloadButton"] button {{
     width: 100%;
-    background: linear-gradient(180deg, rgba(255,255,255,0.05) 0%, transparent 100%);
+    background: transparent;
     border: 1px solid {C_BORDER};
-    color: {C_TEXT};
-    border-radius: 8px;
+    color: {C_MUTED};
+    border-radius: 6px;
     font-weight: 600;
-    font-size: 0.85rem;
+    font-size: 0.81rem;
     letter-spacing: 0.04em;
     transition: all 0.3s ease;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
 }}
 div[data-testid="stButton"] button:hover {{
     border-color: {C_ACCENT};
-    color: {C_TEXT};
-    box-shadow: 0 0 16px rgba(56, 189, 248, 0.3);
-    background: rgba(56, 189, 248, 0.1);
-    transform: translateY(-1px);
+    color: {C_ACCENT};
+    box-shadow: 0 0 10px {C_ACCENT}44;
 }}
 div[data-testid="stDownloadButton"] button {{
-    border-color: {C_GREEN}AA;
-    color: #34d399; /* emerald 400 */
+    border-color: {C_GREEN}88;
+    color: {C_GREEN};
 }}
 div[data-testid="stDownloadButton"] button:hover {{
     border-color: {C_GREEN};
-    box-shadow: 0 0 16px rgba(16, 185, 129, 0.3);
-    background: rgba(16, 185, 129, 0.1);
-    color: #fff;
+    box-shadow: 0 0 10px {C_GREEN}44;
+    background: {C_GREEN}11;
 }}
 
 /* ═══════════════════════════════════════════════════════════
    8. MISC
 ══════════════════════════════════════════════════════════════ */
-hr {{ border-color: rgba(255,255,255,0.08) !important; opacity: 1 !important; margin: 1.5em 0 !important; }}
+hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
 [data-testid="stDataFrame"] {{
     border: 1px solid {C_BORDER};
-    border-radius: 10px;
+    border-radius: 8px;
     overflow: hidden;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
 }}
-.stCaption, small {{ color: {C_MUTED} !important; font-size: 0.8rem !important; letter-spacing: 0.01em; }}
+.stCaption, small {{ color: {C_MUTED} !important; font-size: 0.77rem !important; }}
 
 /* ═══════════════════════════════════════════════════════════
    9. EYEBROW / LEGEND / BADGES
 ══════════════════════════════════════════════════════════════ */
 .eyebrow {{
-    font-size: 0.68rem;
-    font-weight: 800;
-    letter-spacing: 0.15em;
+    font-size: 0.67rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
     color: {C_ACCENT};
-    margin-bottom: 6px;
-    animation: fadeIn 0.6s ease;
+    margin-bottom: 4px;
+    animation: fadeIn 0.5s ease;
 }}
 .legend-row {{
     display: flex;
-    gap: 10px;
+    gap: 8px;
     flex-wrap: wrap;
-    margin-bottom: 16px;
+    margin-bottom: 12px;
 }}
 .legend-pill {{
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 4px 14px;
+    gap: 5px;
+    padding: 3px 11px;
     border-radius: 20px;
-    font-size: 0.75rem;
-    font-weight: 700;
-    letter-spacing: 0.03em;
+    font-size: 0.73rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
     animation: fadeIn 0.4s ease both;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
 }}
 .route-badge {{
     display: inline-block;
-    background: linear-gradient(90deg, rgba(56, 189, 248, 0.15), rgba(2, 132, 199, 0.15));
-    border: 1px solid rgba(56, 189, 248, 0.4);
+    background: {C_ACCENT}18;
+    border: 1px solid {C_ACCENT}55;
     border-radius: 20px;
-    padding: 4px 14px;
-    font-size: 0.75rem;
-    font-weight: 800;
+    padding: 3px 12px;
+    font-size: 0.73rem;
+    font-weight: 700;
     color: {C_ACCENT};
-    letter-spacing: 0.05em;
+    letter-spacing: 0.04em;
     animation: fadeIn 0.5s ease;
-    margin-left: 10px;
-    box-shadow: 0 2px 10px rgba(56, 189, 248, 0.1);
+    margin-left: 8px;
 }}
 .age-badge {{
     display: inline-block;
     border-radius: 20px;
-    padding: 4px 14px;
-    font-size: 0.75rem;
-    font-weight: 800;
-    letter-spacing: 0.05em;
+    padding: 3px 12px;
+    font-size: 0.73rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
     animation: fadeIn 0.5s ease;
-    margin-left: 10px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+    margin-left: 8px;
 }}
 
 /* ═══════════════════════════════════════════════════════════
@@ -404,28 +399,29 @@ hr {{ border-color: rgba(255,255,255,0.08) !important; opacity: 1 !important; ma
 ══════════════════════════════════════════════════════════════ */
 .status-dot {{
     display: inline-block;
-    width: 8px;
-    height: 8px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
     background: {C_GREEN};
     animation: pulse 2s infinite;
-    margin-right: 10px;
+    margin-right: 8px;
     vertical-align: middle;
-    box-shadow: 0 0 8px {C_GREEN}AA;
+    flex-shrink: 0;
 }}
 .status-bar {{
     display: flex;
     align-items: center;
-    background: rgba(16, 185, 129, 0.05);
-    border: 1px solid rgba(16, 185, 129, 0.3);
-    border-radius: 8px;
-    padding: 8px 14px;
-    font-size: 0.75rem;
-    font-weight: 800;
-    color: #34d399; /* emerald 400 */
-    letter-spacing: 0.08em;
+    background: {C_BG};
+    border: 1px solid {C_BORDER};
+    border-radius: 6px;
+    padding: 7px 12px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: {C_GREEN};
+    letter-spacing: 0.07em;
     text-transform: uppercase;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
+    animation: borderGlow 3s ease infinite;
 }}
 </style>
 """, unsafe_allow_html=True)
