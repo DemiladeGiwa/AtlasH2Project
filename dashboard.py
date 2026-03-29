@@ -45,7 +45,7 @@ from carbon_abatement import CarbonAbatementCalculator
 # ── PAGE CONFIG ───────────────────────────────────────────────────────────────
 
 st.set_page_config(
-    page_title="Atlas-H2 | Digital Twin v6.2",
+    page_title="Atlas-H2 | Demilade Giwa",
     page_icon="🚆",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -487,7 +487,7 @@ def route_label(km: int) -> str:
 
 with st.sidebar:
     st.markdown(
-        '<div class="eyebrow" style="margin-bottom:8px;">Atlas-H2 · Digital Twin v6.2</div>',
+        '<div class="eyebrow" style="margin-bottom:8px;">Atlas-H2 · By Demilade Giwa</div>',
         unsafe_allow_html=True,
     )
     st.markdown(
