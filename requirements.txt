@@ -1,0 +1,16 @@
+#Data/Math
+numpy>=2.4.3
+pandas>=3.0.1
+scipy>=1.15.0
+
+#UI
+streamlit>=1.55.0
+streamlit-folium>=0.20.0
+
+# Further Visualization
+plotly>=6.0.0
+folium>=0.19.0
+matplotlib>=3.10.0
+
+#Further Simulation (Optional)
+# pyH2A>=1.0.0  # Professional H2 Analysis framework
