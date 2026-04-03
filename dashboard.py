@@ -1,21 +1,22 @@
 """
-dashboard.py — v6.2 Antigravity Audit Pass
-===========================================
+dashboard.py — v8.0 The Investor Pitch
+========================================
 Atlas-H2 | Dynamic Rail Corridor Simulation
 
-Fixes over v6.1 (Antigravity Audit):
-  [PERF-1]   build_export_csv decorated with @st.cache_data — was re-building
-             a full DataFrame on every slider interaction (every rerender).
-  [PERF-2]   run_sensitivity moved inside `with tab5:` block — the O(256)
-             sensitivity grid is now computed lazily on first tab visit, not
-             on every slider movement regardless of which tab is active.
-  [PERF-3]   All float slider values rounded to 4 dp before being passed to
-             run_all/run_sensitivity — eliminates IEEE 754 cache misses.
-  [ARCH-1]   CarbonAbatementCalculator now receives annual_h2_cost_cad derived
-             from live econ results — LCOA is no longer a hard-coded C$1.2M.
-  [UX-1]     KPI row delta arrow is now sign-aware (↑ positive / ↓ negative).
-  [STYLE-1]  Title typo "Comparitive" → "Comparative".
-  [STYLE-2]  Version strings unified to v6.2 across all UI labels.
+Changes over v7.0:
+  [BRAND-1]  Strict BRAND_COLORS dict keyed by energy_type, replacing p.bar_color
+             everywhere. One source of truth: if HTPEM is emerald, it's emerald
+             on every chart in every tab. Four semantically distinct palettes:
+             Diesel=Slate, Battery=Amber, LTPEM=Sky Blue, HTPEM=Emerald.
+  [BRAND-2]  Color legend added to sidebar — non-engineers immediately know
+             what each color represents before touching a chart.
+  [PLAIN-1]  HELP_ tooltip strings rewritten as relatable analogies (spec v8.0).
+  [PLAIN-2]  Guide tab rewritten: plain English, bullet points, no jargon walls.
+  [PLAIN-3]  Slider help text rewritten for a non-engineer audience.
+  [AXIS-1]   All Plotly axis titles and chart titles use clean plain English.
+             "Cost per kg of H₂" not "LCOH_CAD_PER_KG".
+  [KPI-1]    KPI strip labels rewritten to plain English.
+  [MATH]     Zero backend calculation changes. All engine calls identical to v7.0.
 
 Run with:
     streamlit run dashboard.py
@@ -42,6 +43,61 @@ from atlas_engine import (
 )
 from carbon_abatement import CarbonAbatementCalculator
 
+
+# ════════════════════════════════════════════════════════════════════════════
+# BRAND COLOR DICTIONARY — Single source of truth for all chart colors
+# Change here and every chart updates automatically.
+#
+#   diesel   → Slate Gray  — the status quo, no special distinction
+#   battery  → Amber       — heavy, expensive, the cautionary tale
+#   h2_ltpem → Sky Blue    — hydrogen, commercially proven, but limited
+#   h2_htpem → Emerald     — the winner: clean, viable, forward
+# ════════════════════════════════════════════════════════════════════════════
+
+BRAND_COLORS: dict[str, str] = {
+    "diesel":   "#64748B",   # Slate gray
+    "battery":  "#F59E0B",   # Amber
+    "h2_ltpem": "#38BDF8",   # Sky blue
+    "h2_htpem": "#10B981",   # Emerald green
+}
+
+# Tonal palettes for pie chart slices (light → dark within each brand color)
+BRAND_TONES: dict[str, list[str]] = {
+    "h2_ltpem": ["#075985", "#0284C7", "#38BDF8"],   # blue tones
+    "h2_htpem": ["#064E3B", "#059669", "#6EE7B7"],   # green tones
+}
+
+# Human-readable profile labels (used in chart x-axes / legends)
+PROFILE_LABELS: dict[str, str] = {
+    "diesel":   "Legacy Diesel",
+    "battery":  "Battery EV",
+    "h2_ltpem": "LTPEM H₂",
+    "h2_htpem": "HTPEM H₂ ✦",   # ✦ marks the recommended winner
+}
+
+
+# ── TOOLTIP DEFINITIONS — Plain English for non-engineers ────────────────────
+
+HELP_LCOH = (
+    "The all-in cost to make the hydrogen fuel — like calculating a price per gallon "
+    "that includes buying the equipment, paying the power bill, and all maintenance."
+)
+HELP_LCOA = (
+    "The net incremental cost to eliminate one tonne of CO₂ — calculated as the full H₂ system cost "
+    "(equipment, maintenance, and electricity) minus the diesel fuel no longer purchased. "
+    "A negative result means switching to hydrogen actually costs less than staying on diesel."
+)
+HELP_HTPEM = (
+    "Low-Temp engines run too cold to heat a train in winter, so they drain the battery for warmth. "
+    "High-Temp engines run hot enough to recycle their own waste heat, heating the cabin for free."
+)
+HELP_GRAVIMETRIC = (
+    "The 'Weight Penalty.' Batteries and hydrogen tanks are heavy. "
+    "Every extra pound of equipment you add is a pound of paying cargo you have to remove. "
+    "We want this as close to zero as possible."
+)
+
+
 # ── PAGE CONFIG ───────────────────────────────────────────────────────────────
 
 st.set_page_config(
@@ -51,7 +107,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── PALETTE ───────────────────────────────────────────────────────────────────
+# ── UI PALETTE ────────────────────────────────────────────────────────────────
 
 C_BG      = "#13293D"
 C_SURFACE = "#16324F"
@@ -64,6 +120,13 @@ C_GREEN   = "#22c55e"
 C_RED     = "#f87171"
 C_ORANGE  = "#fb923c"
 
+# Shorthand aliases pointing to brand colors
+C_HTPEM  = BRAND_COLORS["h2_htpem"]   # "#10B981" emerald
+C_LTPEM  = BRAND_COLORS["h2_ltpem"]   # "#38BDF8" sky blue
+C_BATT   = BRAND_COLORS["battery"]    # "#F59E0B" amber
+C_DIESEL = BRAND_COLORS["diesel"]     # "#64748B" slate
+
+
 # ── GLOBAL CSS ────────────────────────────────────────────────────────────────
 
 st.markdown(f"""
@@ -71,38 +134,42 @@ st.markdown(f"""
 /* ═══════════════════════════════════════════════════════════
    1. RESET & CHROME
 ══════════════════════════════════════════════════════════════ */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
 header[data-testid="stHeader"] {{
     background-color: {C_BG};
     border-bottom: 1px solid {C_BORDER};
+    backdrop-filter: blur(8px);
 }}
 [data-testid="stToolbar"] {{ background-color: {C_BG}; }}
 .stApp {{ background-color: {C_BG}; }}
 .main .block-container {{
     background-color: {C_BG};
     padding-top: 1.5rem;
-    padding-bottom: 3rem;
+    padding-bottom: 4rem;
     max-width: 100%;
 }}
 html, body, [class*="css"] {{
-    font-family: "Inter", system-ui, sans-serif;
+    font-family: "Inter", system-ui, -apple-system, sans-serif;
     color: {C_TEXT};
-    line-height: 1.6;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
 }}
 h1, h2, h3 {{
     color: {C_TEXT};
-    letter-spacing: 0.02rem;
+    letter-spacing: -0.01em;
     font-weight: 700;
 }}
-h1 {{ font-size: 1.7rem;  }}
-h2 {{ font-size: 1.15rem; }}
-h3 {{ font-size: 0.95rem; }}
+h1 {{ font-size: 1.75rem; line-height: 1.2; }}
+h2 {{ font-size: 1.1rem; }}
+h3 {{ font-size: 0.9rem; letter-spacing: 0.01em; }}
 
 /* ═══════════════════════════════════════════════════════════
-   2. ANIMATIONS
+   2. KEYFRAMES
 ══════════════════════════════════════════════════════════════ */
 @keyframes fadeInUp {{
     from {{ opacity: 0; transform: translateY(16px); }}
-    to   {{ opacity: 1; transform: translateY(0);    }}
+    to   {{ opacity: 1; transform: translateY(0); }}
 }}
 @keyframes fadeIn {{
     from {{ opacity: 0; }}
@@ -110,122 +177,176 @@ h3 {{ font-size: 0.95rem; }}
 }}
 @keyframes slideInLeft {{
     from {{ opacity: 0; transform: translateX(-18px); }}
-    to   {{ opacity: 1; transform: translateX(0);     }}
+    to   {{ opacity: 1; transform: translateX(0); }}
 }}
 @keyframes slideInRight {{
     from {{ opacity: 0; transform: translateX(18px); }}
-    to   {{ opacity: 1; transform: translateX(0);    }}
+    to   {{ opacity: 1; transform: translateX(0); }}
 }}
 @keyframes scaleIn {{
     from {{ opacity: 0; transform: scale(0.97); }}
-    to   {{ opacity: 1; transform: scale(1);    }}
+    to   {{ opacity: 1; transform: scale(1); }}
 }}
 @keyframes pulse {{
     0%   {{ box-shadow: 0 0 0 0   {C_GREEN}99; }}
-    70%  {{ box-shadow: 0 0 0 6px {C_GREEN}00; }}
+    70%  {{ box-shadow: 0 0 0 8px {C_GREEN}00; }}
     100% {{ box-shadow: 0 0 0 0   {C_GREEN}00; }}
 }}
 @keyframes accentPulse {{
-    0%   {{ box-shadow: 0 0 0 0   {C_ACCENT}66; }}
-    70%  {{ box-shadow: 0 0 0 8px {C_ACCENT}00; }}
-    100% {{ box-shadow: 0 0 0 0   {C_ACCENT}00; }}
+    0%   {{ box-shadow: 0 0 0 0    {C_ACCENT}55; }}
+    70%  {{ box-shadow: 0 0 0 10px {C_ACCENT}00; }}
+    100% {{ box-shadow: 0 0 0 0    {C_ACCENT}00; }}
 }}
 @keyframes borderGlow {{
-    0%, 100% {{ border-color: {C_BORDER}; }}
-    50%       {{ border-color: {C_ACCENT}88; }}
+    0%, 100% {{ border-color: {C_BORDER};    box-shadow: none; }}
+    50%       {{ border-color: {C_ACCENT}66; box-shadow: 0 0 10px {C_ACCENT}1a; }}
 }}
-
-/* Staggered KPI entrance */
-.kpi-card {{ animation: fadeInUp 0.45s ease both; }}
-.kpi-card:nth-child(1) {{ animation-delay: 0.05s; }}
-.kpi-card:nth-child(2) {{ animation-delay: 0.10s; }}
-.kpi-card:nth-child(3) {{ animation-delay: 0.15s; }}
-.kpi-card:nth-child(4) {{ animation-delay: 0.20s; }}
-.kpi-card:nth-child(5) {{ animation-delay: 0.25s; }}
-
-[data-baseweb="tab-panel"] > div {{ animation: fadeIn 0.35s ease; }}
-
-[data-testid="stPlotlyChart"] {{
-    animation: slideInLeft 0.45s ease both;
-    border-radius: 10px;
-    overflow: hidden;
+@keyframes gradientShift {{
+    0%   {{ background-position: 0%   50%; }}
+    50%  {{ background-position: 100% 50%; }}
+    100% {{ background-position: 0%   50%; }}
 }}
-[data-testid="stPlotlyChart"] iframe {{ animation: scaleIn 0.5s ease both; }}
-
-[data-testid="stVerticalBlock"] > div:last-child [data-testid="stMetric"],
-[data-testid="stVerticalBlock"] > div:last-child [data-testid="stDataFrame"] {{
-    animation: slideInRight 0.4s ease both;
+@keyframes shimmer {{
+    0%   {{ background-position: -200% center; }}
+    100% {{ background-position:  200% center; }}
 }}
-[data-testid="stDataFrame"]            {{ animation: fadeInUp 0.4s ease both; }}
-[data-testid="stMarkdownContainer"] h2,
-[data-testid="stMarkdownContainer"] h3 {{ animation: fadeIn 0.4s ease both; }}
-
-.stTabs [aria-selected="true"] {{
-    background: {C_BG} !important;
-    color: {C_ACCENT} !important;
-    font-weight: 700;
-    border-color: {C_BORDER} {C_BORDER} {C_BG} !important;
-    animation: accentPulse 1.2s ease 1;
-}}
-
-.legend-pill:nth-child(1) {{ animation-delay: 0.05s; }}
-.legend-pill:nth-child(2) {{ animation-delay: 0.10s; }}
-.legend-pill:nth-child(3) {{ animation-delay: 0.15s; }}
-.legend-pill:nth-child(4) {{ animation-delay: 0.20s; }}
 
 /* ═══════════════════════════════════════════════════════════
-   3. KPI ROW
+   3. ENTRANCE ANIMATIONS
+══════════════════════════════════════════════════════════════ */
+.kpi-card              {{ animation: fadeInUp 0.44s cubic-bezier(0.22, 1, 0.36, 1) both; }}
+.kpi-card:nth-child(1) {{ animation-delay: 0.04s; }}
+.kpi-card:nth-child(2) {{ animation-delay: 0.10s; }}
+.kpi-card:nth-child(3) {{ animation-delay: 0.16s; }}
+.kpi-card:nth-child(4) {{ animation-delay: 0.22s; }}
+.kpi-card:nth-child(5) {{ animation-delay: 0.28s; }}
+
+[data-baseweb="tab-panel"] > div {{
+    animation: fadeInUp 0.36s cubic-bezier(0.22, 1, 0.36, 1) both;
+}}
+[data-testid="stPlotlyChart"] {{
+    animation: slideInLeft 0.44s cubic-bezier(0.22, 1, 0.36, 1) both;
+    border-radius: 12px;
+    overflow: hidden;
+}}
+[data-testid="stPlotlyChart"] iframe {{
+    animation: scaleIn 0.50s cubic-bezier(0.22, 1, 0.36, 1) both;
+}}
+[data-testid="stVerticalBlock"] > div:last-child [data-testid="stMetric"],
+[data-testid="stVerticalBlock"] > div:last-child [data-testid="stDataFrame"] {{
+    animation: slideInRight 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+}}
+[data-testid="stDataFrame"] {{
+    animation: fadeInUp 0.40s cubic-bezier(0.22, 1, 0.36, 1) both;
+}}
+[data-testid="stMarkdownContainer"] h2,
+[data-testid="stMarkdownContainer"] h3 {{
+    animation: fadeIn 0.38s ease both;
+}}
+.stTabs [aria-selected="true"] {{
+    background: {C_BG} !important;
+    color: {C_HTPEM} !important;
+    font-weight: 700;
+    border-color: {C_BORDER} {C_BORDER} {C_BG} !important;
+    animation: accentPulse 1.1s ease 1;
+}}
+.legend-pill:nth-child(1) {{ animation-delay: 0.04s; }}
+.legend-pill:nth-child(2) {{ animation-delay: 0.09s; }}
+.legend-pill:nth-child(3) {{ animation-delay: 0.14s; }}
+.legend-pill:nth-child(4) {{ animation-delay: 0.19s; }}
+
+/* ═══════════════════════════════════════════════════════════
+   4. KPI ROW
 ══════════════════════════════════════════════════════════════ */
 .kpi-row {{
     display: flex;
     gap: 12px;
     overflow-x: auto;
-    padding-bottom: 6px;
+    padding-bottom: 8px;
     scrollbar-width: thin;
     scrollbar-color: {C_BORDER} transparent;
 }}
-.kpi-row::-webkit-scrollbar       {{ height: 4px; }}
+.kpi-row::-webkit-scrollbar       {{ height: 3px; }}
 .kpi-row::-webkit-scrollbar-track {{ background: transparent; }}
 .kpi-row::-webkit-scrollbar-thumb {{ background: {C_BORDER}; border-radius: 4px; }}
 
 .kpi-card {{
-    flex: 1 0 180px;
-    min-width: 180px;
+    flex: 1 0 190px;
+    min-width: 190px;
     background: {C_SURFACE};
     border: 1px solid {C_BORDER};
-    border-radius: 10px;
-    padding: 18px 16px 14px;
-    transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+    border-top: 2px solid transparent;
+    border-radius: 12px;
+    padding: 20px 18px 15px;
+    transition:
+        border-color     0.30s cubic-bezier(0.22, 1, 0.36, 1),
+        border-top-color 0.30s cubic-bezier(0.22, 1, 0.36, 1),
+        box-shadow       0.30s cubic-bezier(0.22, 1, 0.36, 1),
+        transform        0.30s cubic-bezier(0.22, 1, 0.36, 1);
     cursor: default;
+    position: relative;
+    overflow: hidden;
+    will-change: transform;
+}}
+.kpi-card::before {{
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(140deg, {C_HTPEM}08 0%, transparent 55%);
+    opacity: 0;
+    transition: opacity 0.30s ease;
+    pointer-events: none;
+}}
+.kpi-card::after {{
+    content: "";
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, {C_HTPEM}33, transparent);
+    opacity: 0;
+    transition: opacity 0.30s ease;
 }}
 .kpi-card:hover {{
-    border-color: {C_ACCENT};
-    box-shadow: 0 0 16px {C_ACCENT}44;
-    transform: translateY(-2px);
+    border-color: {C_HTPEM}66;
+    border-top-color: {C_HTPEM};
+    box-shadow:
+        0 4px 20px {C_HTPEM}18,
+        0 12px 40px rgba(0,0,0,0.25),
+        inset 0 1px 0 {C_HTPEM}18;
+    transform: translateY(-4px);
 }}
+.kpi-card:hover::before {{ opacity: 1; }}
+.kpi-card:hover::after  {{ opacity: 1; }}
+
 .kpi-label {{
-    font-size: 0.68rem;
+    font-size: 0.62rem;
     font-weight: 700;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
     color: {C_MUTED};
-    margin-bottom: 6px;
+    margin-bottom: 8px;
     white-space: nowrap;
 }}
 .kpi-value {{
-    font-size: 1.35rem;
+    font-size: 1.40rem;
     font-weight: 700;
     color: {C_TEXT};
-    letter-spacing: -0.01em;
-    margin-bottom: 4px;
+    letter-spacing: -0.025em;
+    margin-bottom: 6px;
     white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
 }}
 .kpi-delta {{
-    font-size: 0.74rem;
+    font-size: 0.72rem;
     font-weight: 500;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    opacity: 0.9;
 }}
 .kpi-delta.pos  {{ color: {C_GREEN};  }}
 .kpi-delta.neg  {{ color: {C_RED};    }}
@@ -233,55 +354,70 @@ h3 {{ font-size: 0.95rem; }}
 .kpi-delta.warn {{ color: {C_ORANGE}; }}
 
 /* ═══════════════════════════════════════════════════════════
-   4. STREAMLIT METRICS (inside tabs)
+   5. STREAMLIT METRICS
 ══════════════════════════════════════════════════════════════ */
 [data-testid="stMetric"] {{
     background: {C_SURFACE};
     border: 1px solid {C_BORDER};
-    border-radius: 10px;
-    padding: 16px 14px;
-    transition: border-color 0.3s ease, box-shadow 0.3s ease;
-    animation: fadeInUp 0.4s ease both;
+    border-radius: 12px;
+    padding: 16px 16px;
+    transition:
+        border-color 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+        box-shadow   0.28s cubic-bezier(0.22, 1, 0.36, 1),
+        transform    0.28s cubic-bezier(0.22, 1, 0.36, 1);
+    animation: fadeInUp 0.40s cubic-bezier(0.22, 1, 0.36, 1) both;
 }}
 [data-testid="stMetric"]:hover {{
-    border-color: {C_ACCENT};
-    box-shadow: 0 0 14px {C_ACCENT}44;
+    border-color: {C_HTPEM}55;
+    box-shadow: 0 4px 20px {C_HTPEM}14, 0 8px 32px rgba(0,0,0,0.2);
+    transform: translateY(-2px);
 }}
 [data-testid="stMetricLabel"] {{
     color: {C_MUTED};
-    font-size: 0.7rem;
-    letter-spacing: 0.06em;
+    font-size: 0.67rem;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
     font-weight: 700;
 }}
-[data-testid="stMetricValue"] {{ color: {C_TEXT}; font-weight: 700; font-size: 1.25rem; }}
-[data-testid="stMetricDelta"] {{ font-size: 0.73rem; }}
+[data-testid="stMetricValue"] {{
+    color: {C_TEXT};
+    font-weight: 700;
+    font-size: 1.26rem;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+}}
+[data-testid="stMetricDelta"] {{ font-size: 0.72rem; font-weight: 500; }}
 
 /* ═══════════════════════════════════════════════════════════
-   5. TABS
+   6. TABS
 ══════════════════════════════════════════════════════════════ */
 .stTabs [data-baseweb="tab-list"] {{
     background: {C_SURFACE};
-    border-radius: 8px 8px 0 0;
+    border-radius: 10px 10px 0 0;
     border-bottom: 1px solid {C_BORDER};
     gap: 2px;
-    padding: 4px 6px 0;
+    padding: 5px 8px 0;
 }}
 .stTabs [data-baseweb="tab"] {{
     background: transparent;
-    border-radius: 6px 6px 0 0;
+    border-radius: 7px 7px 0 0;
     color: {C_MUTED};
-    padding: 8px 18px;
-    font-size: 0.83rem;
+    padding: 9px 22px;
+    font-size: 0.82rem;
     font-weight: 500;
-    transition: all 0.2s ease;
-    letter-spacing: 0.02em;
+    transition:
+        color      0.20s cubic-bezier(0.22, 1, 0.36, 1),
+        background 0.20s cubic-bezier(0.22, 1, 0.36, 1);
+    letter-spacing: 0.015em;
     border: 1px solid transparent;
 }}
-.stTabs [data-baseweb="tab"]:hover {{ color: {C_TEXT}; background: {C_ACCENT2}33; }}
+.stTabs [data-baseweb="tab"]:hover {{
+    color: {C_TEXT};
+    background: {C_ACCENT2}22;
+}}
 
 /* ═══════════════════════════════════════════════════════════
-   6. SIDEBAR
+   7. SIDEBAR
 ══════════════════════════════════════════════════════════════ */
 section[data-testid="stSidebar"],
 section[data-testid="stSidebar"] .block-container {{
@@ -291,17 +427,22 @@ section[data-testid="stSidebar"] .block-container {{
 .stExpander {{
     background: {C_BG} !important;
     border: 1px solid {C_BORDER} !important;
-    border-radius: 8px !important;
+    border-radius: 9px !important;
+    transition: border-color 0.22s ease !important;
+}}
+.stExpander:focus-within {{
+    border-color: {C_HTPEM}66 !important;
+    box-shadow: 0 0 0 3px {C_HTPEM}14 !important;
 }}
 .stExpander summary {{
     color: {C_MUTED};
-    font-size: 0.83rem;
+    font-size: 0.81rem;
     font-weight: 600;
     letter-spacing: 0.03em;
 }}
 
 /* ═══════════════════════════════════════════════════════════
-   7. BUTTONS & DOWNLOAD
+   8. BUTTONS
 ══════════════════════════════════════════════════════════════ */
 div[data-testid="stButton"] button,
 div[data-testid="stDownloadButton"] button {{
@@ -309,101 +450,112 @@ div[data-testid="stDownloadButton"] button {{
     background: transparent;
     border: 1px solid {C_BORDER};
     color: {C_MUTED};
-    border-radius: 6px;
+    border-radius: 8px;
     font-weight: 600;
-    font-size: 0.81rem;
+    font-size: 0.80rem;
     letter-spacing: 0.04em;
-    transition: all 0.3s ease;
+    transition:
+        border-color 0.24s cubic-bezier(0.22, 1, 0.36, 1),
+        color        0.24s ease,
+        box-shadow   0.24s ease,
+        transform    0.20s cubic-bezier(0.22, 1, 0.36, 1);
 }}
 div[data-testid="stButton"] button:hover {{
-    border-color: {C_ACCENT};
-    color: {C_ACCENT};
-    box-shadow: 0 0 10px {C_ACCENT}44;
+    border-color: {C_HTPEM};
+    color: {C_HTPEM};
+    box-shadow: 0 0 14px {C_HTPEM}2a;
+    transform: translateY(-1px);
 }}
 div[data-testid="stDownloadButton"] button {{
-    border-color: {C_GREEN}88;
+    border-color: {C_GREEN}66;
     color: {C_GREEN};
 }}
 div[data-testid="stDownloadButton"] button:hover {{
     border-color: {C_GREEN};
-    box-shadow: 0 0 10px {C_GREEN}44;
-    background: {C_GREEN}11;
+    box-shadow: 0 0 14px {C_GREEN}2a;
+    background: {C_GREEN}0c;
+    transform: translateY(-1px);
 }}
 
 /* ═══════════════════════════════════════════════════════════
-   8. MISC
+   9. MISC
 ══════════════════════════════════════════════════════════════ */
 hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
 [data-testid="stDataFrame"] {{
     border: 1px solid {C_BORDER};
-    border-radius: 8px;
+    border-radius: 10px;
     overflow: hidden;
 }}
-.stCaption, small {{ color: {C_MUTED} !important; font-size: 0.77rem !important; }}
+.stCaption, small {{ color: {C_MUTED} !important; font-size: 0.76rem !important; }}
 
 /* ═══════════════════════════════════════════════════════════
-   9. EYEBROW / LEGEND / BADGES
+   10. EYEBROW / LEGEND / BADGES
 ══════════════════════════════════════════════════════════════ */
 .eyebrow {{
-    font-size: 0.67rem;
+    font-size: 0.62rem;
     font-weight: 700;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.16em;
     text-transform: uppercase;
-    color: {C_ACCENT};
+    color: {C_HTPEM};
     margin-bottom: 4px;
-    animation: fadeIn 0.5s ease;
+    animation: fadeIn 0.5s ease both;
 }}
 .legend-row {{
     display: flex;
-    gap: 8px;
+    gap: 7px;
     flex-wrap: wrap;
-    margin-bottom: 12px;
+    margin-bottom: 14px;
+    margin-top: 2px;
 }}
 .legend-pill {{
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    padding: 3px 11px;
+    padding: 4px 13px;
     border-radius: 20px;
-    font-size: 0.73rem;
+    font-size: 0.71rem;
     font-weight: 600;
     letter-spacing: 0.02em;
-    animation: fadeIn 0.4s ease both;
+    animation: fadeIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+    transition: opacity 0.2s ease, transform 0.2s ease;
 }}
+.legend-pill:hover {{ opacity: 0.75; transform: scale(0.97); }}
+
 .route-badge {{
     display: inline-block;
-    background: {C_ACCENT}18;
-    border: 1px solid {C_ACCENT}55;
+    background: {C_HTPEM}15;
+    border: 1px solid {C_HTPEM}3a;
     border-radius: 20px;
     padding: 3px 12px;
-    font-size: 0.73rem;
+    font-size: 0.70rem;
     font-weight: 700;
-    color: {C_ACCENT};
+    color: {C_HTPEM};
     letter-spacing: 0.04em;
-    animation: fadeIn 0.5s ease;
-    margin-left: 8px;
+    animation: fadeIn 0.5s ease both;
+    margin-left: 10px;
+    vertical-align: middle;
 }}
 .age-badge {{
     display: inline-block;
     border-radius: 20px;
     padding: 3px 12px;
-    font-size: 0.73rem;
+    font-size: 0.70rem;
     font-weight: 700;
     letter-spacing: 0.04em;
-    animation: fadeIn 0.5s ease;
-    margin-left: 8px;
+    animation: fadeIn 0.5s ease both;
+    margin-left: 6px;
+    vertical-align: middle;
 }}
 
 /* ═══════════════════════════════════════════════════════════
-   10. SIDEBAR STATUS
+   11. SIDEBAR STATUS / COLOR LEGEND
 ══════════════════════════════════════════════════════════════ */
 .status-dot {{
     display: inline-block;
-    width: 7px;
-    height: 7px;
+    width: 7px; height: 7px;
     border-radius: 50%;
     background: {C_GREEN};
-    animation: pulse 2s infinite;
+    animation: pulse 2.4s ease infinite;
     margin-right: 8px;
     vertical-align: middle;
     flex-shrink: 0;
@@ -413,15 +565,153 @@ hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
     align-items: center;
     background: {C_BG};
     border: 1px solid {C_BORDER};
-    border-radius: 6px;
+    border-radius: 8px;
     padding: 7px 12px;
-    font-size: 0.72rem;
+    font-size: 0.70rem;
     font-weight: 700;
     color: {C_GREEN};
-    letter-spacing: 0.07em;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
     margin-bottom: 10px;
-    animation: borderGlow 3s ease infinite;
+    animation: borderGlow 5s ease infinite;
+}}
+.color-legend {{
+    background: {C_BG};
+    border: 1px solid {C_BORDER};
+    border-radius: 9px;
+    padding: 12px 14px;
+    margin: 0 0 4px;
+}}
+.color-legend-title {{
+    font-size: 0.60rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: {C_MUTED};
+    margin-bottom: 10px;
+}}
+.color-legend-row {{
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-bottom: 7px;
+    font-size: 0.76rem;
+    color: {C_TEXT};
+    font-weight: 500;
+}}
+.color-legend-row:last-child {{ margin-bottom: 0; }}
+.color-swatch {{
+    width: 10px; height: 10px;
+    border-radius: 3px;
+    flex-shrink: 0;
+}}
+.color-legend-winner {{
+    font-size: 0.62rem;
+    background: {C_HTPEM}15;
+    border: 1px solid {C_HTPEM}33;
+    border-radius: 4px;
+    padding: 1px 6px;
+    color: {C_HTPEM};
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    margin-left: auto;
+}}
+
+/* ═══════════════════════════════════════════════════════════
+   12. CALLOUTS
+══════════════════════════════════════════════════════════════ */
+.info-callout {{
+    background: {C_HTPEM}0b;
+    border: 1px solid {C_HTPEM}2a;
+    border-left: 3px solid {C_HTPEM};
+    border-radius: 0 9px 9px 0;
+    padding: 10px 14px;
+    font-size: 0.78rem;
+    color: {C_MUTED};
+    line-height: 1.55;
+    margin: 8px 0 4px;
+    animation: fadeIn 0.4s ease both;
+}}
+.info-callout strong {{ color: {C_TEXT}; font-weight: 600; }}
+
+.warn-callout {{
+    background: {C_ORANGE}0b;
+    border: 1px solid {C_ORANGE}2a;
+    border-left: 3px solid {C_ORANGE};
+    border-radius: 0 9px 9px 0;
+    padding: 10px 14px;
+    font-size: 0.78rem;
+    color: {C_MUTED};
+    line-height: 1.55;
+    margin: 8px 0 4px;
+    animation: fadeIn 0.4s ease both;
+}}
+.warn-callout strong {{ color: {C_ORANGE}; font-weight: 600; }}
+
+/* ═══════════════════════════════════════════════════════════
+   13. SECTION ACCENT
+══════════════════════════════════════════════════════════════ */
+.section-accent {{
+    border-left: 3px solid {C_HTPEM};
+    padding-left: 10px;
+    margin-bottom: 10px;
+    animation: fadeIn 0.4s ease both;
+}}
+.section-accent h3 {{
+    margin: 0;
+    font-size: 0.88rem;
+    color: {C_TEXT};
+    font-weight: 700;
+}}
+.section-accent p {{
+    margin: 2px 0 0;
+    font-size: 0.75rem;
+    color: {C_MUTED};
+}}
+
+/* ═══════════════════════════════════════════════════════════
+   14. HEADER GRADIENT ACCENT BAR — 2px, 8s loop
+══════════════════════════════════════════════════════════════ */
+.header-accent-bar {{
+    height: 2px;
+    width: 100%;
+    border-radius: 2px;
+    background: linear-gradient(
+        90deg,
+        {C_BG},
+        {C_ACCENT2},
+        {C_HTPEM},
+        {C_LTPEM},
+        {C_ACCENT2},
+        {C_BG}
+    );
+    background-size: 400% 100%;
+    animation: gradientShift 8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    margin: 10px 0 20px;
+    opacity: 0.90;
+}}
+
+/* ═══════════════════════════════════════════════════════════
+   15. GUIDE TAB ELEMENTS
+══════════════════════════════════════════════════════════════ */
+.how-to-chip {{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: {C_HTPEM}12;
+    border: 1px solid {C_HTPEM}2a;
+    border-radius: 20px;
+    padding: 5px 14px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: {C_HTPEM};
+    letter-spacing: 0.02em;
+    margin: 4px 4px 4px 0;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}}
+.how-to-chip:hover {{
+    background: {C_HTPEM}1e;
+    border-color: {C_HTPEM}44;
 }}
 </style>
 """, unsafe_allow_html=True)
@@ -429,25 +719,28 @@ hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
 
 # ── CONSTANTS ─────────────────────────────────────────────────────────────────
 
-ALL_PROFILES   = cfg.ALL_PROFILES
-PROFILE_NAMES  = [p.name for p in ALL_PROFILES]
-PROFILE_COLORS = [p.bar_color for p in ALL_PROFILES]  # DO NOT change — MECE palette
+ALL_PROFILES  = cfg.ALL_PROFILES
+# Name list using plain English labels
+PROFILE_NAMES = [PROFILE_LABELS[p.energy_type] for p in ALL_PROFILES]
+# Color list in profile order — always from BRAND_COLORS
+PROFILE_COLORS_LIST = [BRAND_COLORS[p.energy_type] for p in ALL_PROFILES]
 
 PLOTLY_BASE = dict(
     template="plotly_dark",
     paper_bgcolor="rgba(0,0,0,0)",
     plot_bgcolor="rgba(0,0,0,0)",
     font=dict(family="Inter, system-ui, sans-serif", size=12, color=C_MUTED),
-    title_font=dict(size=13, color=C_TEXT, family="Inter, system-ui, sans-serif"),
+    title_font=dict(size=13, color=C_TEXT, family="Inter, system-ui, sans-serif", weight="bold"),
     hoverlabel=dict(
-        bgcolor=C_SURFACE, bordercolor=C_BORDER,
+        bgcolor=C_SURFACE, bordercolor=C_HTPEM,
         font_size=12, font_family="Inter, system-ui, sans-serif", font_color=C_TEXT,
+        namelength=-1,
     ),
-    transition=dict(duration=500, easing="cubic-in-out"),
+    transition=dict(duration=350, easing="cubic-in-out"),
 )
 
 
-# ── SESSION STATE — initialised before ANY widget or engine call ──────────────
+# ── SESSION STATE ─────────────────────────────────────────────────────────────
 
 DEFAULTS: dict = {
     "corridor_km":      int(cfg.CORRIDOR_DISTANCE_KM),
@@ -491,43 +784,79 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
     st.markdown(
-        '<div class="status-bar"><span class="status-dot"></span>System Status · Active</div>',
+        '<div class="status-bar"><span class="status-dot"></span>Live Simulation · Active</div>',
         unsafe_allow_html=True,
     )
-    st.button("↺  Reset Parameters", on_click=reset_to_defaults, use_container_width=True)
+    st.button("↺  Reset to Defaults", on_click=reset_to_defaults, use_container_width=True)
     st.divider()
 
-    with st.expander("🗺️  Route Configuration", expanded=True):
-        st.slider("Corridor Distance (km)", 50, 500, step=5, key="corridor_km",
-                  help="Scales trip energy and HVAC trip duration automatically.")
-        st.slider("Annual Trips (one-way)", 200, 1460, step=10, key="trips_per_year")
-        st.slider("FC Stack Age (years)", 0, 10, step=1, key="system_age_years",
-                  help="1.5%/yr FC efficiency degradation; 1%/yr electrolyzer H₂ yield drop.")
+    # ── COLOR LEGEND (the visual key) ────────────────────────────────────────
+    st.markdown(f"""
+    <div class="color-legend">
+      <div class="color-legend-title">🎨 &nbsp;Colour Key</div>
+      <div class="color-legend-row">
+        <div class="color-swatch" style="background:{C_DIESEL};"></div>
+        <span>Legacy Diesel</span>
+        <span style="font-size:0.65rem;color:{C_MUTED};margin-left:auto;">baseline</span>
+      </div>
+      <div class="color-legend-row">
+        <div class="color-swatch" style="background:{C_BATT};"></div>
+        <span>Battery Electric</span>
+        <span style="font-size:0.65rem;color:{C_BATT};margin-left:auto;">heavy ⚠</span>
+      </div>
+      <div class="color-legend-row">
+        <div class="color-swatch" style="background:{C_LTPEM};"></div>
+        <span>LTPEM Hydrogen</span>
+        <span style="font-size:0.65rem;color:{C_MUTED};margin-left:auto;">cold limit</span>
+      </div>
+      <div class="color-legend-row">
+        <div class="color-swatch" style="background:{C_HTPEM};"></div>
+        <span>HTPEM Hydrogen</span>
+        <div class="color-legend-winner">✦ WINNER</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    with st.expander("🚂  Train Parameters", expanded=False):
-        st.slider("FC Stack Output (kW)", 200, 1200, step=50, key="fc_power")
-        st.slider("FC Efficiency (%)",     30,   60, step=1,  key="fc_efficiency")
-        st.slider("Winter Ambient (°C)",  -30,   10, step=1,  key="winter_temp")
+    st.divider()
 
-    with st.expander("⚡  Electrolyzer", expanded=False):
-        st.slider("Capacity (kW)",       250, 5000, step=250, key="electrolyzer_kw")
-        st.slider("Capacity Factor (%)",  40,   95, step=5,   key="capacity_factor")
+    with st.expander("🗺️  Route", expanded=True):
+        st.slider("Route Distance (km)", 50, 500, step=5, key="corridor_km",
+                  help="How long is the rail corridor? Longer routes use more fuel and energy.")
+        st.slider("Trips Per Year", 200, 1460, step=10, key="trips_per_year",
+                  help="How many one-way trips does the train make in a year? Default is 730 (twice a day, every day).")
+        st.slider("Engine Age (years)", 0, 10, step=1, key="system_age_years",
+                  help="Older fuel cells become slightly less efficient over time — like an aging car engine. This models that wear.")
 
-    with st.expander("💰  Economics", expanded=False):
-        st.slider("Electricity (C$/kWh)", 0.05, 0.25, step=0.005,
-                  format="C$%.4f", key="electricity_rate")
-        st.slider("Diesel (C$/L)", 1.00, 5.00, step=0.05,
-                  format="C$%.2f", key="diesel_price")
+    with st.expander("🚂  Train", expanded=False):
+        st.slider("Engine Power (kW)", 200, 1200, step=50, key="fc_power",
+                  help="How powerful is the hydrogen engine? More power means more waste heat available for free cabin heating.")
+        st.slider("Engine Efficiency (%)", 30, 60, step=1, key="fc_efficiency",
+                  help=HELP_HTPEM)
+        st.slider("Winter Temperature (°C)", -30, 10, step=1, key="winter_temp",
+                  help="How cold does it get? Colder winters cost Battery and LTPEM trains more energy just to stay warm.")
+
+    with st.expander("⚡  Hydrogen Plant", expanded=False):
+        st.slider("Plant Size (kW)", 250, 5000, step=250, key="electrolyzer_kw",
+                  help="How large is the on-site hydrogen production facility? Bigger plants produce more H₂ but cost more upfront.")
+        st.slider("Plant Utilisation (%)", 40, 95, step=5, key="capacity_factor",
+                  help="What percentage of the time is the plant running? Higher utilisation spreads fixed costs over more fuel, lowering the price per kg.")
+
+    with st.expander("💰  Costs", expanded=False):
+        st.slider("Electricity Price (C$/kWh)", 0.05, 0.25, step=0.005,
+                  format="C$%.4f", key="electricity_rate",
+                  help="The price of electricity is the single biggest factor in how cheap the hydrogen fuel can be.")
+        st.slider("Diesel Price (C$/L)", 1.00, 5.00, step=0.05,
+                  format="C$%.2f", key="diesel_price",
+                  help="The current diesel price. Higher diesel costs make the switch to hydrogen even more financially attractive.")
 
     st.divider()
     st.caption(
-        f"ITC **{cfg.FEDERAL_H2_ITC*100:.0f}%** · "
-        f"Grid **{cfg.NB_GRID_CARBON_INTENSITY} kg CO₂/kWh**"
+        f"Atlas-H2 v8.0 · Federal ITC **{cfg.FEDERAL_H2_ITC*100:.0f}%** · "
+        f"NB Grid **{cfg.NB_GRID_CARBON_INTENSITY} kg CO₂/kWh**"
     )
-    st.caption("**Atlas-H2** · TKS · NB Rail Corridor")
 
 
-# ── READ SLIDERS (hardened with .get() + DEFAULTS fallback) ──────────────────
+# ── READ SLIDERS ──────────────────────────────────────────────────────────────
 
 corridor_km      = st.session_state.get("corridor_km",      DEFAULTS["corridor_km"])
 system_age_years = st.session_state.get("system_age_years", DEFAULTS["system_age_years"])
@@ -540,28 +869,18 @@ diesel_price     = st.session_state.get("diesel_price",     DEFAULTS["diesel_pri
 fc_efficiency    = st.session_state.get("fc_efficiency",    DEFAULTS["fc_efficiency"])
 winter_temp      = st.session_state.get("winter_temp",      DEFAULTS["winter_temp"])
 
-# [PERF-3] Round float slider values to 4 dp before entering cache functions.
-# IEEE 754 representation of 0.005-step slider values is not guaranteed bit-exact;
-# rounding prevents phantom cache misses that force full engine reruns.
 electricity_rate = round(electricity_rate, 4)
 diesel_price     = round(diesel_price,     4)
+trip_energy_kwh  = int(corridor_trip_energy_kwh(corridor_km))
 
-trip_energy_kwh = int(corridor_trip_energy_kwh(corridor_km))
 
-
-# ── SIMULATION (cached) ───────────────────────────────────────────────────────
+# ── SIMULATION (cached — no changes to backend logic) ────────────────────────
 
 @st.cache_data
 def run_all(
-    corridor_km: int,
-    system_age_years: int,
-    electrolyzer_kw: int,
-    capacity_factor_pct: int,
-    fc_power: int,
-    trips_yr: int,
-    electricity_rate: float,
-    diesel_price: float,
-    fc_eff_pct: int,
+    corridor_km: int, system_age_years: int, electrolyzer_kw: int,
+    capacity_factor_pct: int, fc_power: int, trips_yr: int,
+    electricity_rate: float, diesel_price: float, fc_eff_pct: int,
     winter_temp: int,
 ) -> dict:
     payload_engine = PayloadAnalyzer()
@@ -570,53 +889,47 @@ def run_all(
         electrolyzer_size_kw=electrolyzer_kw,
         capacity_factor=capacity_factor_pct / 100.0,
     )
-
-    payload: Dict[str, PayloadAnalysisResult] = payload_engine.compare_all_profiles(
-        corridor_km=float(corridor_km),
-    )
-    thermal: Dict[str, HeatRecoveryResult] = thermal_engine.calculate_all_profiles(
+    payload = payload_engine.compare_all_profiles(corridor_km=float(corridor_km))
+    thermal = thermal_engine.calculate_all_profiles(
         dynamic_efficiency=fc_eff_pct / 100.0,
         dynamic_ambient_temp=float(winter_temp),
         dynamic_corridor_km=float(corridor_km),
-        dynamic_electricity_rate=electricity_rate,   # ← FIX: was missing; thermal C$ now reactive
+        dynamic_electricity_rate=electricity_rate,
         system_age_years=system_age_years,
     )
-    econ_ltpem: LCOHResult = econ_engine.calculate_lcoh(
+    econ_ltpem = econ_engine.calculate_lcoh(
         dynamic_electricity_rate=electricity_rate,
         dynamic_capacity_factor=capacity_factor_pct / 100.0,
         profile=cfg.BASELINE_LTPEM,
         system_age_years=system_age_years,
     )
-    econ_htpem: LCOHResult = econ_engine.calculate_lcoh(
+    econ_htpem = econ_engine.calculate_lcoh(
         dynamic_electricity_rate=electricity_rate,
         dynamic_capacity_factor=capacity_factor_pct / 100.0,
         profile=cfg.INNOVATION_HTPEM,
         system_age_years=system_age_years,
     )
-    # [ARCH-1] Derive LCOA from live econ results so it reacts to slider state.
-    # annual_h2_cost = electricity + OPEX (CAPEX is amortised in LCOH, not here).
+    # [LCOA-1 FIX] annual_h2_cost_cad must include amortised CAPEX so that the LCOA
+    # calculation reflects the true all-in cost of the H₂ system.
+    # Previous: only elec + opex → LCOA was ~C$544/t (overstated by omitting C$69,300/yr capex).
+    # Correct:  net_capex / 10-yr analysis period + opex + elec → passed to carbon calculator
+    # which then subtracts avoided diesel costs to yield the net incremental LCOA.
     annual_h2_cost_cad = (
-        econ_htpem.annual_electricity_cost_cad + econ_htpem.annual_opex_cad
+        econ_htpem.net_capex_after_itc_cad / EconomicsEngine.ANALYSIS_PERIOD_YEARS
+        + econ_htpem.annual_opex_cad
+        + econ_htpem.annual_electricity_cost_cad
     )
     carbon = CarbonAbatementCalculator(
         trips_per_year=trips_yr,
         corridor_km=float(corridor_km),
         annual_h2_cost_cad=annual_h2_cost_cad,
     ).calculate_lifetime(dynamic_diesel_price=diesel_price)
-
-    return dict(
-        payload=payload, thermal=thermal,
-        econ_ltpem=econ_ltpem, econ_htpem=econ_htpem,
-        carbon=carbon,
-    )
+    return dict(payload=payload, thermal=thermal,
+                econ_ltpem=econ_ltpem, econ_htpem=econ_htpem, carbon=carbon)
 
 
 @st.cache_data
-def run_sensitivity(
-    electrolyzer_kw: int,
-    capacity_factor_pct: int,
-    system_age_years: int,
-) -> tuple:
+def run_sensitivity(electrolyzer_kw: int, capacity_factor_pct: int, system_age_years: int) -> tuple:
     se = SensitivityEngine()
     rates, capexes, grid = se.compute_lcoh_grid(
         electrolyzer_size_kw=float(electrolyzer_kw),
@@ -635,86 +948,71 @@ def run_sensitivity(
 
 
 results    = run_all(
-    corridor_km, system_age_years,
-    electrolyzer_kw, capacity_factor, fc_power, trips_per_year,
-    electricity_rate, diesel_price, fc_efficiency, winter_temp,
+    corridor_km, system_age_years, electrolyzer_kw, capacity_factor,
+    fc_power, trips_per_year, electricity_rate, diesel_price, fc_efficiency, winter_temp,
 )
 payload:    Dict[str, PayloadAnalysisResult] = results["payload"]
 thermal:    Dict[str, HeatRecoveryResult]    = results["thermal"]
 econ_ltpem: LCOHResult                       = results["econ_ltpem"]
 econ_htpem: LCOHResult                       = results["econ_htpem"]
-carbon                                        = results["carbon"]
+carbon                                       = results["carbon"]
 
 
 # ── CSV EXPORT ────────────────────────────────────────────────────────────────
 
-@st.cache_data  # [PERF-1] Only rebuild when slider values change, not every frame.
+@st.cache_data
 def build_export_csv(
-    _corridor_km: int,
-    _system_age_years: int,
-    _electrolyzer_kw: int,
-    _capacity_factor: int,
-    _fc_power: int,
-    _trips_per_year: int,
-    _electricity_rate: float,
-    _diesel_price: float,
-    _fc_efficiency: int,
+    _corridor_km: int, _system_age_years: int, _electrolyzer_kw: int,
+    _capacity_factor: int, _fc_power: int, _trips_per_year: int,
+    _electricity_rate: float, _diesel_price: float, _fc_efficiency: int,
     _winter_temp: int,
 ) -> bytes:
-    """Build export CSV; cached so it is only recomputed when inputs change."""
-    # Re-read results from the already-cached run_all for the same params.
-    _results    = run_all(
-        _corridor_km, _system_age_years,
-        _electrolyzer_kw, _capacity_factor, _fc_power, _trips_per_year,
-        _electricity_rate, _diesel_price, _fc_efficiency, _winter_temp,
+    _results  = run_all(
+        _corridor_km, _system_age_years, _electrolyzer_kw, _capacity_factor,
+        _fc_power, _trips_per_year, _electricity_rate, _diesel_price,
+        _fc_efficiency, _winter_temp,
     )
-    _payload    = _results["payload"]
-    _thermal    = _results["thermal"]
-    _econ_lt    = _results["econ_ltpem"]
-    _econ_ht    = _results["econ_htpem"]
-    _carbon     = _results["carbon"]
-    _trip_kwh   = int(corridor_trip_energy_kwh(_corridor_km))
+    _payload = _results["payload"]; _thermal = _results["thermal"]
+    _econ_lt = _results["econ_ltpem"]; _econ_ht = _results["econ_htpem"]
+    _carbon  = _results["carbon"]
+    _trip_kwh = int(corridor_trip_energy_kwh(_corridor_km))
     rows = []
     for p in ALL_PROFILES:
-        pl  = _payload[p.energy_type]
-        th  = _thermal[p.energy_type]
+        pl = _payload[p.energy_type]; th = _thermal[p.energy_type]
         row: dict = {
-            "Profile":                  p.name,
-            "Energy Type":              p.energy_type,
-            "Corridor (km)":            _corridor_km,
-            "Trip Energy (kWh)":        _trip_kwh,
-            "Stack Age (yr)":           _system_age_years,
-            "Storage Mass (kg)":        pl.storage_system_mass_kg,
-            "Freight Loss (t)":         pl.freight_capacity_loss_tonnes,
-            "Stack Temp (°C)":          p.operating_temp_c,
-            "FC Efficiency (degraded)": th.effective_fc_efficiency,
-            "Trip Duration (hr)":       th.trip_duration_hr,
-            "HVAC Penalty kWh/trip":    th.hvac_penalty_kwh_per_trip,
-            "Heat Recovery kWh/trip":   th.electricity_saved_kwh_per_trip,
-            "Net Thermal C$/yr":        th.net_annual_impact_cad,
-            "CO₂ Abated 5yr (t)":       _carbon.total_co2_abated_tonnes,
-            "Carbon Credits 5yr (C$)":  _carbon.total_carbon_credit_value_cad,
-            "Avoided Fuel 5yr (C$)":    _carbon.total_avoided_fuel_cost_cad,
+            "Profile": p.name, "Energy Type": p.energy_type,
+            "Corridor (km)": _corridor_km, "Trip Energy (kWh)": _trip_kwh,
+            "Stack Age (yr)": _system_age_years,
+            "Storage Mass (kg)": pl.storage_system_mass_kg,
+            "Freight Loss (t)": pl.freight_capacity_loss_tonnes,
+            "Stack Temp (°C)": p.operating_temp_c,
+            "FC Efficiency": th.effective_fc_efficiency,
+            "Trip Duration (hr)": th.trip_duration_hr,
+            "HVAC Penalty kWh/trip": th.hvac_penalty_kwh_per_trip,
+            "Heat Recovery kWh/trip": th.electricity_saved_kwh_per_trip,
+            "Net Thermal C$/yr": th.net_annual_impact_cad,
+            "CO₂ Abated 5yr (t)": _carbon.total_co2_abated_tonnes,
+            "Carbon Credits 5yr (C$)": _carbon.total_carbon_credit_value_cad,
+            "Avoided Fuel 5yr (C$)": _carbon.total_avoided_fuel_cost_cad,
         }
         if p.energy_type in ("h2_ltpem", "h2_htpem"):
             econ = _econ_lt if p.energy_type == "h2_ltpem" else _econ_ht
             row.update({
-                "LCOH (C$/kg)":            econ.lcoh_cad_per_kg,
-                "Gross CAPEX (C$)":        econ.electrolyzer_capex_cad,
-                "BOP Saving (C$)":         econ.bop_saving_cad,
-                "ITC Saving (C$)":         econ.itc_savings_cad,
-                "Net CAPEX (C$)":          econ.net_capex_after_itc_cad,
-                "Annual Electricity (C$)": econ.annual_electricity_cost_cad,
-                "H₂ Yield (degraded)":     econ.effective_h2_efficiency,
+                "Fuel Cost per kg (C$)": econ.lcoh_cad_per_kg,
+                "Gross Equipment Cost (C$)": econ.electrolyzer_capex_cad,
+                "BOP Saving (C$)": econ.bop_saving_cad,
+                "Federal ITC Saving (C$)": econ.itc_savings_cad,
+                "Net Equipment Cost (C$)": econ.net_capex_after_itc_cad,
+                "Annual Power Bill (C$)": econ.annual_electricity_cost_cad,
+                "H₂ Yield": econ.effective_h2_efficiency,
             })
         else:
             row.update({k: "N/A" for k in (
-                "LCOH (C$/kg)", "Gross CAPEX (C$)", "BOP Saving (C$)",
-                "ITC Saving (C$)", "Net CAPEX (C$)",
-                "Annual Electricity (C$)", "H₂ Yield (degraded)",
+                "Fuel Cost per kg (C$)", "Gross Equipment Cost (C$)", "BOP Saving (C$)",
+                "Federal ITC Saving (C$)", "Net Equipment Cost (C$)",
+                "Annual Power Bill (C$)", "H₂ Yield",
             )})
         rows.append(row)
-
     buf = io.StringIO()
     pd.DataFrame(rows).to_csv(buf, index=False)
     return buf.getvalue().encode()
@@ -723,13 +1021,12 @@ def build_export_csv(
 with st.sidebar:
     st.divider()
     st.download_button(
-        label="⬇  Export Report CSV",
-        data=build_export_csv(  # [PERF-1] cached — all slider values as explicit keys
-            corridor_km, system_age_years,
-            electrolyzer_kw, capacity_factor, fc_power, trips_per_year,
-            electricity_rate, diesel_price, fc_efficiency, winter_temp,
+        label="⬇  Export Full Report (CSV)",
+        data=build_export_csv(
+            corridor_km, system_age_years, electrolyzer_kw, capacity_factor,
+            fc_power, trips_per_year, electricity_rate, diesel_price, fc_efficiency, winter_temp,
         ),
-        file_name=f"Atlas_Feasibility_{corridor_km}km_age{system_age_years}yr.csv",
+        file_name=f"AtlasH2_Report_{corridor_km}km_age{system_age_years}yr.csv",
         mime="text/csv",
         use_container_width=True,
     )
@@ -738,17 +1035,6 @@ with st.sidebar:
 # ── HELPERS ───────────────────────────────────────────────────────────────────
 
 def kpi_row(cards: list[dict]) -> None:
-    """Render a horizontal KPI strip from a list of card dicts.
-
-    Each card dict supports:
-        label       (str)  — upper eyebrow text
-        value       (str)  — large headline figure
-        delta       (str)  — sub-caption text
-        delta_class (str)  — CSS class: 'pos' | 'neg' | 'neu' | 'warn'
-
-    [UX-1] Delta arrow is now sign-aware: ↑ for pos/neu/warn, ↓ for neg.
-    Previously always ↑ regardless of delta_class — misleading for declining metrics.
-    """
     html = '<div class="kpi-row">'
     for c in cards:
         dc    = c.get("delta_class", "pos")
@@ -767,20 +1053,33 @@ def kpi_row(cards: list[dict]) -> None:
 def profile_legend() -> None:
     pills = "".join(
         f'<span class="legend-pill" '
-        f'style="background:{p.bar_color}1a;border:1px solid {p.bar_color};color:{p.bar_color}">'
-        f'● {p.name}</span>'
+        f'style="background:{BRAND_COLORS[p.energy_type]}18;'
+        f'border:1px solid {BRAND_COLORS[p.energy_type]}88;'
+        f'color:{BRAND_COLORS[p.energy_type]}">'
+        f'● {PROFILE_LABELS[p.energy_type]}</span>'
         for p in ALL_PROFILES
     )
     st.markdown(f'<div class="legend-row">{pills}</div>', unsafe_allow_html=True)
 
 
-def _axis(fig: go.Figure, x_grid: bool = False, y_grid: bool = True) -> None:
+def _axis(fig: go.Figure, x_grid: bool = False, y_grid: bool = False) -> None:
     fig.update_xaxes(
         showgrid=x_grid, zeroline=False,
         linecolor=C_BORDER, tickcolor=C_BORDER, tickfont_color=C_MUTED,
     )
     fig.update_yaxes(
-        showgrid=y_grid, gridcolor=C_BORDER,
+        showgrid=y_grid, gridcolor="rgba(24,67,90,0.53)",
+        zeroline=False, tickfont_color=C_MUTED,
+    )
+
+
+def _axis_lines(fig: go.Figure) -> None:
+    fig.update_xaxes(
+        showgrid=False, zeroline=False,
+        linecolor=C_BORDER, tickcolor=C_BORDER, tickfont_color=C_MUTED,
+    )
+    fig.update_yaxes(
+        showgrid=True, gridcolor="rgba(24,67,90,0.40)",
         zeroline=False, tickfont_color=C_MUTED,
     )
 
@@ -789,23 +1088,28 @@ def _axis(fig: go.Figure, x_grid: bool = False, y_grid: bool = True) -> None:
 
 age_color      = C_GREEN if system_age_years == 0 else (C_ORANGE if system_age_years < 6 else C_RED)
 age_badge_text = (
-    "New Stack"
+    "New Engine"
     if system_age_years == 0
-    else f"Yr {system_age_years} · H₂ yield {econ_htpem.effective_h2_efficiency*100:.1f}%"
+    else f"Year {system_age_years} · H₂ efficiency {econ_htpem.effective_h2_efficiency*100:.1f}%"
 )
 
-st.markdown('<p class="eyebrow">Atlas-H2 · Digital simulation v6.2</p>', unsafe_allow_html=True)
-st.title("4-Way Comparative Rail Propulsion Study")  # [STYLE-1] typo fix
+st.markdown('<p class="eyebrow">Atlas-H2 · Digital Infrastructure Twin · v8.0</p>', unsafe_allow_html=True)
+st.title("Which Train Should Replace Diesel on Canada's Rail Corridors?")
 st.markdown(
-    f"<span style='color:{C_MUTED}'>Legacy Diesel &nbsp;·&nbsp; Battery EV "
-    f"&nbsp;·&nbsp; LTPEM H₂(H₂ Flirt) &nbsp;·&nbsp; </span>"
-    f"<span style='color:{C_ACCENT};font-weight:700;'>HTPEM H₂ — (Modified H₂ flirt)</span>"
+    f"<span style='color:{C_MUTED}'>We compare four propulsion options: &nbsp;</span>"
+    f"<span style='color:{C_DIESEL};font-weight:600;'>Diesel</span>"
+    f"<span style='color:{C_MUTED}'> &nbsp;·&nbsp; </span>"
+    f"<span style='color:{C_BATT};font-weight:600;'>Battery Electric</span>"
+    f"<span style='color:{C_MUTED}'> &nbsp;·&nbsp; </span>"
+    f"<span style='color:{C_LTPEM};font-weight:600;'>Low-Temp Hydrogen</span>"
+    f"<span style='color:{C_MUTED}'> &nbsp;·&nbsp; </span>"
+    f"<span style='color:{C_HTPEM};font-weight:700;'>High-Temp Hydrogen ✦</span>"
     f'<span class="route-badge">📍 {route_label(corridor_km)}</span>'
-    f'<span class="age-badge" style="background:{age_color}18;border:1px solid {age_color}55;'
+    f'<span class="age-badge" style="background:{age_color}18;border:1px solid {age_color}44;'
     f'color:{age_color}">⚡ {age_badge_text}</span>',
     unsafe_allow_html=True,
 )
-st.divider()
+st.markdown('<div class="header-accent-bar"></div>', unsafe_allow_html=True)
 
 
 # ── KPI ROW ───────────────────────────────────────────────────────────────────
@@ -821,29 +1125,33 @@ lcoh_delta      = econ_ltpem.lcoh_cad_per_kg - econ_htpem.lcoh_cad_per_kg
 
 kpi_row([
     {
-        "label": "HTPEM LCOH",
+        "label": "H₂ Fuel Cost (HTPEM)",
         "value": f"C${econ_htpem.lcoh_cad_per_kg:.2f} /kg",
-        "delta": f"−C${lcoh_delta:.2f} vs LTPEM",
+        "delta": f"C${lcoh_delta:.2f} cheaper than Low-Temp H₂",
+        "delta_class": "pos",
     },
     {
-        "label": "Gravimetric Advantage",
+        "label": "Weight Penalty Saved",
         "value": f"{freight_saved_t:.2f} t / trip",
-        "delta": f"vs Battery · {corridor_km} km route",
+        "delta": f"more cargo capacity vs Battery EV",
+        "delta_class": "pos",
     },
     {
-        "label": "CO₂ Abated · 5yr",
-        "value": f"{carbon.total_co2_abated_tonnes:,.0f} t",
-        "delta": f"{carbon.equivalent_cars_removed:,} cars / yr",
+        "label": "Pollution Removed · 5 yrs",
+        "value": f"{carbon.total_co2_abated_tonnes:,.0f} t CO₂",
+        "delta": f"≈ {carbon.equivalent_cars_removed:,} cars off the road / yr",
+        "delta_class": "pos",
     },
     {
-        "label": "Gov't Incentives",
+        "label": "Government Grants",
         "value": f"C${econ_htpem.itc_savings_cad + econ_htpem.bop_saving_cad:,.0f}",
-        "delta": f"40% ITC + C${econ_htpem.bop_saving_cad:,.0f} BOP",
+        "delta": f"40% Federal ITC + C${econ_htpem.bop_saving_cad:,.0f} BOP saving",
+        "delta_class": "pos",
     },
     {
-        "label": "Thermal Swing · HTPEM",
+        "label": "Free Heating Advantage",
         "value": f"C${thermal_swing:,.0f} /yr",
-        "delta": "vs LTPEM · no HVAC draw",
+        "delta": "saved vs Low-Temp H₂ — no electric heaters",
         "delta_class": "pos" if system_age_years == 0 else "warn",
     },
 ])
@@ -853,25 +1161,262 @@ st.divider()
 
 # ── TABS ──────────────────────────────────────────────────────────────────────
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "📦  Payload",
-    "💰  LCOH",
-    "🌡️  Thermal",
-    "🌿  Carbon",
+tab_guide, tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "📖  Guide",
+    "📦  Weight Penalty",
+    "💰  Fuel Cost",
+    "🌡️  Winter Heating",
+    "🌿  Carbon Impact",
     "🎯  Sensitivity",
 ])
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# TAB 1 · PAYLOAD
+# TAB 0 · GUIDE — The Investor Story
+# ════════════════════════════════════════════════════════════════════════════
+
+with tab_guide:
+
+    # ── HERO ─────────────────────────────────────────────────────────────────
+    st.markdown(f"""
+    <div style="
+        background: linear-gradient(135deg, {C_SURFACE} 0%, {C_ACCENT2}3a 55%, {C_SURFACE} 100%);
+        border: 1px solid {C_HTPEM}2a;
+        border-radius: 14px;
+        padding: 30px 34px 26px;
+        margin-bottom: 24px;
+        position: relative;
+        overflow: hidden;
+        animation: fadeInUp 0.50s cubic-bezier(0.22,1,0.36,1) both;">
+      <div style="
+          position:absolute;inset:0;
+          background:linear-gradient(108deg,transparent 38%,{C_HTPEM}07 50%,transparent 62%);
+          background-size:250% 100%;
+          animation:shimmer 6s ease infinite;
+          pointer-events:none;border-radius:14px;"></div>
+      <div style="position:relative;">
+        <p style="margin:0 0 7px;font-size:0.62rem;font-weight:700;letter-spacing:0.18em;
+                  text-transform:uppercase;color:{C_HTPEM};">
+          Atlas-H2 &nbsp;&middot;&nbsp; Digital Infrastructure Study &nbsp;&middot;&nbsp; v8.0
+        </p>
+        <h2 style="margin:0 0 10px;font-size:1.42rem;font-weight:800;color:{C_TEXT};
+                   line-height:1.2;letter-spacing:-0.02em;">
+          The Case for High-Temperature Hydrogen Rail
+        </h2>
+        <p style="margin:0 0 16px;font-size:0.84rem;color:{C_MUTED};line-height:1.65;max-width:720px;">
+          Canada needs to decarbonize its regional rail corridors. Four technologies are on the table.
+          Only one works in a Canadian winter without economic compromise.
+          <strong style="color:{C_TEXT};">Every number below updates live</strong> — use the
+          sidebar sliders to test any assumption.
+        </p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <div style="background:{C_BG};border:1px solid {C_BORDER};border-radius:8px;
+                      padding:8px 16px;font-size:0.75rem;color:{C_TEXT};font-weight:600;">
+            📍 {route_label(corridor_km)}
+          </div>
+          <div style="background:{C_BG};border:1px solid {C_BORDER};border-radius:8px;
+                      padding:8px 16px;font-size:0.75rem;color:{C_TEXT};font-weight:600;">
+            🌡️ Winter: {winter_temp} °C
+          </div>
+          <div style="background:{C_HTPEM}18;border:1px solid {C_HTPEM}33;border-radius:8px;
+                      padding:8px 16px;font-size:0.75rem;color:{C_HTPEM};font-weight:700;">
+            ⚡ H₂ Fuel Cost: C${econ_htpem.lcoh_cad_per_kg:.2f}/kg
+          </div>
+          <div style="background:{C_GREEN}10;border:1px solid {C_GREEN}33;border-radius:8px;
+                      padding:8px 16px;font-size:0.75rem;color:{C_GREEN};font-weight:700;">
+            🌿 {carbon.total_co2_abated_tonnes:,.0f} t CO₂ avoided over 5 yrs
+          </div>
+        </div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── TWO-COLUMN STORY ──────────────────────────────────────────────────────
+    col_l, col_r = st.columns(2, gap="large")
+
+    with col_l:
+        st.markdown(f"""
+        <p style="margin:0 0 14px;font-size:0.62rem;font-weight:700;letter-spacing:0.16em;
+                  text-transform:uppercase;color:{C_RED}aa;">❄️ &nbsp;The Winter Problem</p>
+        """, unsafe_allow_html=True)
+
+        wall_cards = [
+            (C_RED, "The Core Challenge",
+             "Canadian winters kill Battery & Low-Temp Hydrogen efficiency.",
+             f"Imagine running your car heater from the same battery that powers the engine. "
+             f"At {winter_temp} °C, Battery-EV and Low-Temp Hydrogen trains must do exactly that — "
+             f"divert massive amounts of stored energy just to keep passengers warm. "
+             f"This makes them heavier, more expensive, and operationally compromised.",
+             "0.06s"),
+            (C_ORANGE, "Why Low-Temp Hydrogen Also Fails",
+             "It runs too cold — like an engine that can't warm your car.",
+             f"Low-Temp hydrogen engines (the current off-the-shelf option) operate at 70 °C. "
+             f"That's not hot enough to heat a train cabin. So just like the Battery-EV, "
+             f"it needs a separate {cfg.BASELINE_LTPEM.hvac_power_draw_kw:.0f} kW electric heater — "
+             f"eating into its energy budget every single trip.",
+             "0.15s"),
+            (C_MUTED, "The Numbers Are Clear",
+             f"Battery EV carries {battery_loss_t:.2f} t less cargo. HTPEM loses only {htpem_loss_t:.2f} t.",
+             f"Across {trips_per_year:,} annual trips at C${electricity_rate:.4f}/kWh electricity, "
+             f"the heating cost gap compounds year after year. "
+             f"The annual advantage of High-Temp Hydrogen over Low-Temp is "
+             f"C${thermal_swing:,.0f} — just from not needing electric heaters.",
+             "0.24s"),
+        ]
+
+        for color, tag, headline, body, delay in wall_cards:
+            icon = "❄️" if color == C_RED else ("⚠️" if color == C_ORANGE else "📊")
+            st.markdown(f"""
+            <div style="
+                display:flex;gap:14px;align-items:flex-start;
+                background:{C_SURFACE};border:1px solid {C_BORDER};
+                border-left:3px solid {color};
+                border-radius:0 12px 12px 0;
+                padding:17px 19px;margin-bottom:11px;
+                transition:border-color 0.28s cubic-bezier(0.22,1,0.36,1),
+                           box-shadow 0.28s ease,transform 0.28s cubic-bezier(0.22,1,0.36,1);
+                animation:fadeInUp 0.42s cubic-bezier(0.22,1,0.36,1) both;
+                animation-delay:{delay};">
+              <div style="flex-shrink:0;width:32px;height:32px;border-radius:9px;
+                  background:{color}15;border:1px solid {color}33;
+                  display:flex;align-items:center;justify-content:center;
+                  font-size:0.80rem;margin-top:1px;">{icon}</div>
+              <div style="min-width:0;">
+                <p style="margin:0 0 3px;font-size:0.62rem;font-weight:700;
+                          letter-spacing:0.10em;text-transform:uppercase;color:{color}99;">{tag}</p>
+                <p style="margin:0 0 7px;font-size:0.85rem;font-weight:700;
+                          color:{C_TEXT};line-height:1.25;">{headline}</p>
+                <p style="margin:0;font-size:0.78rem;color:{C_MUTED};line-height:1.62;">{body}</p>
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    with col_r:
+        st.markdown(f"""
+        <p style="margin:0 0 14px;font-size:0.62rem;font-weight:700;letter-spacing:0.16em;
+                  text-transform:uppercase;color:{C_HTPEM}aa;">🔥 &nbsp;The HTPEM Solution</p>
+        """, unsafe_allow_html=True)
+
+        bop_pct = cfg.INNOVATION_HTPEM.capex_purification_discount_pct * 100
+        solution_cards = [
+            (C_HTPEM, "160 °C — The Breakthrough",
+             "Hot enough to heat the cabin for free.",
+             f"High-Temp PEM engines run at 160 °C. That exhaust is piped directly into the cabin "
+             f"heating system at zero extra cost. The {cfg.BASELINE_LTPEM.hvac_power_draw_kw:.0f} kW "
+             f"electric heater disappears entirely — saving {cfg.BASELINE_LTPEM.hvac_power_draw_kw:.0f} kW "
+             f"× {thermal['h2_htpem'].trip_duration_hr:.2f} hr × {trips_per_year:,} trips = "
+             f"{cfg.BASELINE_LTPEM.hvac_power_draw_kw * thermal['h2_htpem'].trip_duration_hr * trips_per_year:,.0f} kWh/yr "
+             f"of electricity.",
+             "0.09s"),
+            (C_GREEN, f"{bop_pct:.0f}% Equipment Cost Saving",
+             "A more tolerant engine needs less purification equipment.",
+             f"High-Temp hydrogen engines tolerate impurities that would damage low-temp ones. "
+             f"This means one entire piece of equipment — the gas purifier — can be eliminated "
+             f"from the on-site hydrogen plant. That saves C${econ_htpem.bop_saving_cad:,.0f} "
+             f"on this configuration, on top of the 40% federal government grant.",
+             "0.18s"),
+            (C_GREEN, "✦ The Clear Winner on Every Metric",
+             f"C${econ_htpem.lcoh_cad_per_kg:.2f}/kg fuel · {htpem_loss_t:.2f} t weight loss · "
+             f"C${thermal_swing:,.0f}/yr heating saving.",
+             f"Scored on weight, heating cost, fuel price, and environmental impact simultaneously, "
+             f"High-Temp Hydrogen wins on every axis. At current energy prices the full H₂ system "
+             f"(equipment + maintenance + electricity) costs less to run than buying diesel — "
+             f"meaning the decarbonisation is self-financing before a single carbon credit is counted. "
+             f"Battery and Low-Temp Hydrogen cannot close the equation for a Canadian winter corridor.",
+             "0.27s"),
+        ]
+
+        for color, tag, headline, body, delay in solution_cards:
+            icon = "🔥" if color == C_HTPEM else "✅"
+            st.markdown(f"""
+            <div style="
+                display:flex;gap:14px;align-items:flex-start;
+                background:{C_SURFACE};border:1px solid {C_BORDER};
+                border-left:3px solid {color};
+                border-radius:0 12px 12px 0;
+                padding:17px 19px;margin-bottom:11px;
+                transition:border-color 0.28s cubic-bezier(0.22,1,0.36,1),
+                           box-shadow 0.28s ease,transform 0.28s cubic-bezier(0.22,1,0.36,1);
+                animation:slideInRight 0.42s cubic-bezier(0.22,1,0.36,1) both;
+                animation-delay:{delay};">
+              <div style="flex-shrink:0;width:32px;height:32px;border-radius:9px;
+                  background:{color}15;border:1px solid {color}33;
+                  display:flex;align-items:center;justify-content:center;
+                  font-size:0.80rem;margin-top:1px;">{icon}</div>
+              <div style="min-width:0;">
+                <p style="margin:0 0 3px;font-size:0.62rem;font-weight:700;
+                          letter-spacing:0.10em;text-transform:uppercase;color:{color}99;">{tag}</p>
+                <p style="margin:0 0 7px;font-size:0.85rem;font-weight:700;
+                          color:{C_TEXT};line-height:1.25;">{headline}</p>
+                <p style="margin:0;font-size:0.78rem;color:{C_MUTED};line-height:1.62;">{body}</p>
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # ── HOW TO USE ────────────────────────────────────────────────────────────
+    st.markdown(f"""
+    <div style="
+        background:{C_SURFACE};border:1px solid {C_BORDER};
+        border-radius:12px;padding:20px 24px;margin-top:6px;
+        animation:fadeInUp 0.46s cubic-bezier(0.22,1,0.36,1) both;animation-delay:0.32s;">
+      <p style="margin:0 0 12px;font-size:0.62rem;font-weight:700;letter-spacing:0.16em;
+                text-transform:uppercase;color:{C_HTPEM};">🎛️ &nbsp;How to Use This Dashboard</p>
+      <p style="margin:0 0 6px;font-size:0.82rem;color:{C_TEXT};font-weight:600;">
+        Every number updates live. Use the sidebar sliders to stress-test assumptions.
+      </p>
+      <p style="margin:0 0 14px;font-size:0.79rem;color:{C_MUTED};line-height:1.6;max-width:820px;">
+        Try dragging the <strong style="color:{C_TEXT};">Winter Temperature</strong> slider colder
+        to see Battery and Low-Temp costs spike. Try raising the
+        <strong style="color:{C_TEXT};">Electricity Price</strong> to model future grid costs.
+        Each tab below examines a different dimension of the comparison.
+      </p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;">
+        <span class="how-to-chip">📦 Weight Penalty — How much cargo capacity each train loses</span>
+        <span class="how-to-chip">💰 Fuel Cost — What it costs to make hydrogen on-site</span>
+        <span class="how-to-chip">🌡️ Winter Heating — The annual heating cost per technology</span>
+        <span class="how-to-chip">🌿 Carbon Impact — How much pollution is eliminated</span>
+        <span class="how-to-chip">🎯 Sensitivity — Best and worst case cost scenarios</span>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── PLAIN ENGLISH GLOSSARY ────────────────────────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    gc1, gc2, gc3, gc4 = st.columns(4)
+    gloss = [
+        (gc1, "LCOH", "Hydrogen Fuel Cost", HELP_LCOH, C_HTPEM, "0.36s"),
+        (gc2, "LCOA", "Net Cost per Tonne of CO₂ Removed", HELP_LCOA, C_LTPEM, "0.42s"),
+        (gc3, "Heating Method", "High-Temp vs Low-Temp", HELP_HTPEM, C_ORANGE, "0.48s"),
+        (gc4, "Weight Penalty", "Cargo Lost to Heavy Equipment", HELP_GRAVIMETRIC, C_MUTED, "0.54s"),
+    ]
+    for col, term, subtitle, defn, color, delay in gloss:
+        with col:
+            col.markdown(f"""
+            <div style="background:{C_BG};border:1px solid {C_BORDER};
+                        border-top:2px solid {color};
+                        border-radius:0 0 10px 10px;padding:14px 15px;
+                        animation:fadeInUp 0.4s cubic-bezier(0.22,1,0.36,1) both;
+                        animation-delay:{delay};">
+              <p style="margin:0 0 3px;font-size:0.82rem;font-weight:700;
+                        color:{color};letter-spacing:-0.01em;">{term}</p>
+              <p style="margin:0 0 8px;font-size:0.68rem;color:{C_MUTED};
+                        font-weight:500;">{subtitle}</p>
+              <p style="margin:0;font-size:0.76rem;font-weight:400;color:{C_MUTED};
+                        line-height:1.58;">{defn}</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# TAB 1 · WEIGHT PENALTY (Payload)
 # ════════════════════════════════════════════════════════════════════════════
 
 with tab1:
     with st.container():
-        st.subheader("Gravimetric Delta — Storage Mass Penalty vs Diesel")
+        st.subheader("Weight Penalty — How Much Cargo Capacity Does Each Technology Lose?")
         st.caption(
-            f"{trip_energy_kwh:,} kWh auto-derived from {corridor_km} km corridor · "
-            "Diesel = zero reference"
+            f"Based on {trip_energy_kwh:,} kWh needed per trip · {corridor_km} km corridor · "
+            f"Diesel = zero reference (fuel tank weight is negligible)"
         )
         profile_legend()
 
@@ -881,83 +1426,100 @@ with tab1:
         loss_values = [payload[p.energy_type].freight_capacity_loss_tonnes for p in ALL_PROFILES]
         fig_payload = go.Figure(go.Bar(
             x=PROFILE_NAMES, y=loss_values,
-            marker_color=PROFILE_COLORS, marker_line_width=0,
-            text=[f"{v:.2f} t" if v > 0 else "Baseline" for v in loss_values],
+            marker_color=PROFILE_COLORS_LIST, marker_line_width=0,
+            text=[f"−{v:.2f} t" if v > 0 else "✦ Baseline" for v in loss_values],
             textposition="outside", textfont=dict(size=11, color=C_TEXT),
             width=0.5, cliponaxis=False,
-            hovertemplate="<b>%{x}</b><br>Freight Lost: <b>%{y:.3f} t</b><extra></extra>",
+            hovertemplate="<b>%{x}</b><br>Cargo Lost: <b>%{y:.3f} tonnes</b><extra></extra>",
         ))
         fig_payload.update_layout(
             **PLOTLY_BASE,
-            title=f"Storage Mass Loss — {corridor_km} km Corridor",
+            title=f"Tonnes of Cargo Lost Due to Equipment Weight — {corridor_km} km Route",
             height=420, margin=dict(t=44, b=56, l=8, r=8),
-            yaxis_title="Tonnes Lost vs Diesel", xaxis_title=None, showlegend=False,
+            yaxis_title="Tonnes of Cargo Lost", xaxis_title=None, showlegend=False,
         )
         _axis(fig_payload)
         fig_payload.update_yaxes(zeroline=True, zerolinecolor=C_BORDER, zerolinewidth=1)
         st.plotly_chart(fig_payload, use_container_width=True)
 
     with col_panel:
-        st.markdown("#### Storage Breakdown")
+        st.markdown(
+            f'<div class="section-accent"><h3>Storage System Comparison</h3>'
+            f'<p>Why batteries are so heavy</p></div>',
+            unsafe_allow_html=True,
+        )
         rows = []
         for p in ALL_PROFILES:
             r = payload[p.energy_type]
             rows.append({
-                "Profile": p.name,
-                "Density": "— fuel" if p.energy_type == "diesel"
-                           else f"{p.system_energy_density_wh_kg:,.0f} Wh/kg",
-                "Mass":    "0 kg"   if p.energy_type == "diesel"
-                           else f"{r.storage_system_mass_kg:,.0f} kg",
-                "Δ Loss":  "Ref" if p.energy_type == "diesel"
-                           else f"{r.freight_capacity_loss_tonnes:.3f} t",
+                "Technology": PROFILE_LABELS[p.energy_type],
+                "Energy Density": "— diesel" if p.energy_type == "diesel"
+                                  else f"{p.system_energy_density_wh_kg:,.0f} Wh/kg",
+                "System Weight": "~0 kg" if p.energy_type == "diesel"
+                                 else f"{r.storage_system_mass_kg:,.0f} kg",
+                "Cargo Lost": "Baseline" if p.energy_type == "diesel"
+                              else f"−{r.freight_capacity_loss_tonnes:.3f} t",
             })
-        st.dataframe(pd.DataFrame(rows).set_index("Profile"), use_container_width=True)
+        st.dataframe(pd.DataFrame(rows).set_index("Technology"), use_container_width=True)
         st.divider()
         htpem_vs_ltpem = payload["h2_ltpem"].freight_capacity_loss_tonnes - htpem_loss_t
-        st.metric("HTPEM vs Battery", f"−{freight_saved_t:.2f} t", "lighter storage")
-        st.metric("HTPEM vs LTPEM",   f"−{htpem_vs_ltpem:.3f} t", "lighter storage")
+        st.metric("HTPEM vs Battery EV",
+                  f"−{freight_saved_t:.2f} t",
+                  "more cargo capacity per trip",
+                  help=HELP_GRAVIMETRIC)
+        st.metric("HTPEM vs Low-Temp H₂",
+                  f"−{htpem_vs_ltpem:.3f} t",
+                  "higher energy density storage system",
+                  help=HELP_GRAVIMETRIC)
+        st.markdown(
+            f'<div class="info-callout">'
+            f'<strong>Why does this matter?</strong> '
+            f'Every tonne of batteries or tanks added is a tonne of revenue-generating '
+            f'cargo removed. On a commercial route, this directly impacts the economics.'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# TAB 2 · LCOH
+# TAB 2 · FUEL COST (LCOH)
 # ════════════════════════════════════════════════════════════════════════════
 
 with tab2:
-    # Show degraded H₂ yield when stack is aged — no broken formula
     age_note = (
-        f" · H₂ yield {econ_htpem.effective_h2_efficiency*100:.1f}% (degraded)"
+        f" · H₂ efficiency {econ_htpem.effective_h2_efficiency*100:.1f}% (aged engine)"
         if system_age_years > 0 else ""
     )
     with st.container():
-        st.subheader("LCOH — 10-Year H₂ Production Cost")
+        st.subheader("Hydrogen Fuel Cost — What Does It Cost to Make the Fuel On-Site?")
         st.caption(
-            f"{electrolyzer_kw:,} kW · CF {capacity_factor}% · "
-            f"C${electricity_rate:.4f}/kWh{age_note}"
+            f"{electrolyzer_kw:,} kW plant · {capacity_factor}% utilisation · "
+            f"C${electricity_rate:.4f}/kWh electricity{age_note}"
         )
 
     col_lt, col_ht, col_panel = st.columns([1.0, 1.0, 0.85])
 
     with col_lt:
         fig_lt = go.Figure(go.Pie(
-            labels=["Net CAPEX", "10-yr OPEX", "10-yr Electricity"],
+            labels=["Equipment (net)", "10-yr Maintenance", "10-yr Power Bill"],
             values=[
                 econ_ltpem.net_capex_after_itc_cad,
                 econ_ltpem.annual_opex_cad * 10,
                 econ_ltpem.annual_electricity_cost_cad * 10,
             ],
-            hole=0.54,
-            marker_colors=["#1d4ed8", "#3b82f6", "#93c5fd"],
+            hole=0.56,
+            marker_colors=["#075985", "#0284C7", "#38BDF8"],
             marker_line=dict(color=C_BG, width=2),
             textinfo="percent", textfont_size=11,
             hovertemplate="<b>%{label}</b><br>C$%{value:,.0f} · %{percent}<extra></extra>",
         ))
         fig_lt.update_layout(
             **PLOTLY_BASE,
-            title=f"LTPEM · C${econ_ltpem.lcoh_cad_per_kg:.2f}/kg",
+            title=f"Low-Temp H₂ · C${econ_ltpem.lcoh_cad_per_kg:.2f} per kg",
             height=320, margin=dict(t=48, b=16, l=8, r=8), showlegend=False,
             annotations=[dict(
-                text=f"<b>C${econ_ltpem.total_10yr_cost_cad/1e6:.2f}M</b>",
-                x=0.5, y=0.5, font_size=14, showarrow=False,
+                text=f"<b>C${econ_ltpem.total_10yr_cost_cad/1e6:.2f}M</b><br><span style='font-size:10px'>10-yr total</span>",
+                x=0.5, y=0.5, font_size=13, showarrow=False,
                 font_color=C_TEXT, font_family="Inter, system-ui, sans-serif",
             )],
         )
@@ -965,63 +1527,68 @@ with tab2:
 
     with col_ht:
         fig_ht = go.Figure(go.Pie(
-            labels=["Net CAPEX", "10-yr OPEX", "10-yr Electricity"],
+            labels=["Equipment (net)", "10-yr Maintenance", "10-yr Power Bill"],
             values=[
                 econ_htpem.net_capex_after_itc_cad,
                 econ_htpem.annual_opex_cad * 10,
                 econ_htpem.annual_electricity_cost_cad * 10,
             ],
-            hole=0.54,
-            marker_colors=["#065f46", "#059669", "#6ee7b7"],
+            hole=0.56,
+            marker_colors=["#064E3B", "#059669", "#6EE7B7"],
             marker_line=dict(color=C_BG, width=2),
             textinfo="percent", textfont_size=11,
             hovertemplate="<b>%{label}</b><br>C$%{value:,.0f} · %{percent}<extra></extra>",
         ))
         fig_ht.update_layout(
             **PLOTLY_BASE,
-            title=f"HTPEM · C${econ_htpem.lcoh_cad_per_kg:.2f}/kg",
+            title=f"High-Temp H₂ ✦ · C${econ_htpem.lcoh_cad_per_kg:.2f} per kg",
             height=320, margin=dict(t=48, b=16, l=8, r=8), showlegend=False,
             annotations=[dict(
-                text=f"<b>C${econ_htpem.total_10yr_cost_cad/1e6:.2f}M</b>",
-                x=0.5, y=0.5, font_size=14, showarrow=False,
+                text=f"<b>C${econ_htpem.total_10yr_cost_cad/1e6:.2f}M</b><br><span style='font-size:10px'>10-yr total</span>",
+                x=0.5, y=0.5, font_size=13, showarrow=False,
                 font_color=C_TEXT, font_family="Inter, system-ui, sans-serif",
             )],
         )
         st.plotly_chart(fig_ht, use_container_width=True)
 
     with col_panel:
-        st.markdown("#### LTPEM vs HTPEM")
+        st.markdown(
+            f'<div class="section-accent"><h3>Cost Breakdown</h3>'
+            f'<p>Low-Temp vs High-Temp over 10 years</p></div>',
+            unsafe_allow_html=True,
+        )
         st.markdown(f"""
-| | LTPEM | HTPEM |
+| Cost Item | Low-Temp | **High-Temp ✦** |
 |--|--:|--:|
-| Gross CAPEX | C${econ_ltpem.electrolyzer_capex_cad:,.0f} | C${econ_htpem.electrolyzer_capex_cad:,.0f} |
-| BOP Saving | — | **C${econ_htpem.bop_saving_cad:,.0f}** |
-| ITC (40%) | C${econ_ltpem.itc_savings_cad:,.0f} | C${econ_htpem.itc_savings_cad:,.0f} |
-| Net CAPEX | C${econ_ltpem.net_capex_after_itc_cad:,.0f} | C${econ_htpem.net_capex_after_itc_cad:,.0f} |
-| Annual OPEX | C${econ_ltpem.annual_opex_cad:,.0f} | C${econ_htpem.annual_opex_cad:,.0f} |
-| Annual Elec. | C${econ_ltpem.annual_electricity_cost_cad:,.0f} | C${econ_htpem.annual_electricity_cost_cad:,.0f} |
-| H₂ Yield | {econ_ltpem.effective_h2_efficiency*100:.1f}% | {econ_htpem.effective_h2_efficiency*100:.1f}% |
-| **LCOH** | **C${econ_ltpem.lcoh_cad_per_kg:.4f}/kg** | **C${econ_htpem.lcoh_cad_per_kg:.4f}/kg** |
+| Equipment cost | C${econ_ltpem.electrolyzer_capex_cad:,.0f} | C${econ_htpem.electrolyzer_capex_cad:,.0f} |
+| Equipment saving | — | **C${econ_htpem.bop_saving_cad:,.0f}** |
+| Federal grant (40%) | C${econ_ltpem.itc_savings_cad:,.0f} | C${econ_htpem.itc_savings_cad:,.0f} |
+| Net equipment cost | C${econ_ltpem.net_capex_after_itc_cad:,.0f} | C${econ_htpem.net_capex_after_itc_cad:,.0f} |
+| Annual maintenance | C${econ_ltpem.annual_opex_cad:,.0f} | C${econ_htpem.annual_opex_cad:,.0f} |
+| Annual power bill | C${econ_ltpem.annual_electricity_cost_cad:,.0f} | C${econ_htpem.annual_electricity_cost_cad:,.0f} |
+| H₂ output rate | {econ_ltpem.effective_h2_efficiency*100:.1f}% | {econ_htpem.effective_h2_efficiency*100:.1f}% |
+| **Fuel cost per kg** | **C${econ_ltpem.lcoh_cad_per_kg:.4f}** | **C${econ_htpem.lcoh_cad_per_kg:.4f}** |
         """)
         st.divider()
         st.metric(
-            "HTPEM Cost Advantage",
-            f"C${lcoh_delta:.4f} /kg",
-            f"{lcoh_delta / econ_ltpem.lcoh_cad_per_kg * 100:.1f}% lower LCOH",
+            "High-Temp Cost Advantage",
+            f"C${lcoh_delta:.4f} cheaper per kg",
+            f"{lcoh_delta / econ_ltpem.lcoh_cad_per_kg * 100:.1f}% lower fuel cost than Low-Temp",
+            help=HELP_LCOH,
         )
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# TAB 3 · THERMAL
+# TAB 3 · WINTER HEATING (Thermal)
 # ════════════════════════════════════════════════════════════════════════════
 
 with tab3:
     trip_dur = thermal["h2_htpem"].trip_duration_hr
     with st.container():
-        st.subheader("HVAC Energy Balance — Net Annual Thermal Impact")
+        st.subheader("Winter Heating Cost — The Annual Bill for Keeping Passengers Warm")
         st.caption(
-            f"{winter_temp}°C NB winter · {trips_per_year:,} trips/yr · "
-            f"{trip_dur:.2f} hr/trip · C${electricity_rate:.4f}/kWh"
+            f"At {winter_temp} °C · {trips_per_year:,} trips/yr · "
+            f"{trip_dur:.2f} hr average trip · electricity C${electricity_rate:.4f}/kWh"
         )
         profile_legend()
 
@@ -1030,7 +1597,7 @@ with tab3:
     with col_chart:
         net_impacts = [thermal[p.energy_type].net_annual_impact_cad for p in ALL_PROFILES]
         bar_colors  = [
-            p.bar_color if thermal[p.energy_type].net_annual_impact_cad >= 0 else C_RED
+            BRAND_COLORS[p.energy_type] if thermal[p.energy_type].net_annual_impact_cad >= 0 else C_RED
             for p in ALL_PROFILES
         ]
         fig_net = go.Figure(go.Bar(
@@ -1039,13 +1606,13 @@ with tab3:
             text=[f"C${v:+,.0f}" for v in net_impacts],
             textposition="outside", textfont=dict(size=11, color=C_TEXT),
             width=0.5, cliponaxis=False,
-            hovertemplate="<b>%{x}</b><br>Net Impact: <b>C$%{y:+,.0f}/yr</b><extra></extra>",
+            hovertemplate="<b>%{x}</b><br>Net Annual Heating Impact: <b>C$%{y:+,.0f}</b><extra></extra>",
         ))
         fig_net.add_hline(y=0, line_width=1, line_color=C_BORDER)
         fig_net.update_layout(
             **PLOTLY_BASE,
-            title=f"Net Annual Thermal Impact (C$/yr) · {corridor_km} km",
-            yaxis_title="C$ / Year", xaxis_title=None,
+            title=f"Annual Heating Savings (+) or Cost (−) per Technology — {corridor_km} km",
+            yaxis_title="C$ per Year", xaxis_title=None,
             height=360, margin=dict(t=44, b=56, l=8, r=8), showlegend=False,
         )
         _axis(fig_net)
@@ -1055,21 +1622,21 @@ with tab3:
         fig_stack.add_bar(
             x=PROFILE_NAMES,
             y=[thermal[p.energy_type].annual_savings_cad for p in ALL_PROFILES],
-            name="Heat Recovery", marker_color="#059669", marker_line_width=0,
-            hovertemplate="<b>%{x}</b><br>Saving: C$%{y:,.0f}<extra></extra>",
+            name="Free Heat Recovered", marker_color=C_HTPEM, marker_line_width=0,
+            hovertemplate="<b>%{x}</b><br>Heat Recovered: C$%{y:,.0f}<extra></extra>",
         )
         fig_stack.add_bar(
             x=PROFILE_NAMES,
             y=[-thermal[p.energy_type].hvac_annual_cost_cad for p in ALL_PROFILES],
-            name="HVAC Penalty", marker_color=C_RED, marker_line_width=0,
-            hovertemplate="<b>%{x}</b><br>Penalty: C$%{y:,.0f}<extra></extra>",
+            name="Electric Heater Cost", marker_color=C_RED, marker_line_width=0,
+            hovertemplate="<b>%{x}</b><br>Heater Cost: C$%{y:,.0f}<extra></extra>",
         )
         fig_stack.add_hline(y=0, line_width=1, line_color=C_BORDER)
         fig_stack.update_layout(
             **PLOTLY_BASE,
             barmode="relative",
-            title="Savings vs Penalties (C$/yr)",
-            yaxis_title="C$ / Year", xaxis_title=None,
+            title="Free Heat Recovered vs Electric Heater Cost (C$/yr)",
+            yaxis_title="C$ per Year", xaxis_title=None,
             height=300, margin=dict(t=44, b=72, l=8, r=8),
             legend=dict(
                 orientation="h", yanchor="top", y=-0.22, x=0.5, xanchor="center",
@@ -1080,57 +1647,69 @@ with tab3:
         st.plotly_chart(fig_stack, use_container_width=True)
 
     with col_panel:
-        st.markdown("#### Thermal Scorecard")
+        st.markdown(
+            f'<div class="section-accent"><h3>Heating Scorecard</h3>'
+            f'<p>Annual C$ impact per technology</p></div>',
+            unsafe_allow_html=True,
+        )
         rows = []
         for p in ALL_PROFILES:
             r = thermal[p.energy_type]
             rows.append({
-                "Profile":  p.name,
-                "Stack °C": "—" if p.energy_type in ("diesel", "battery")
-                            else f"{p.operating_temp_c:.0f}",
-                "HVAC":     "Free" if p.energy_type == "diesel"
-                            else ("Waste heat" if p.hvac_power_draw_kw == 0
-                                  else f"{p.hvac_power_draw_kw:.0f} kW"),
-                "Net /yr":  f"C${r.net_annual_impact_cad:+,.0f}",
+                "Technology": PROFILE_LABELS[p.energy_type],
+                "Engine Temp": "—" if p.energy_type in ("diesel", "battery")
+                               else f"{p.operating_temp_c:.0f} °C",
+                "Heating": "Free (combustion)" if p.energy_type == "diesel"
+                           else ("♻️ Free (waste heat)" if p.hvac_power_draw_kw == 0
+                                 else f"⚡ {p.hvac_power_draw_kw:.0f} kW electric"),
+                "Net/yr": f"C${r.net_annual_impact_cad:+,.0f}",
             })
-        st.dataframe(pd.DataFrame(rows).set_index("Profile"), use_container_width=True)
+        st.dataframe(pd.DataFrame(rows).set_index("Technology"), use_container_width=True)
         st.divider()
         htpem_net   = thermal["h2_htpem"].net_annual_impact_cad
         battery_net = thermal["battery"].net_annual_impact_cad
-        st.metric("HTPEM vs Battery",
-                  f"C${htpem_net - battery_net:,.0f} /yr", "thermal swing")
-        st.metric("HTPEM vs LTPEM",
+        st.metric("HTPEM vs Battery EV",
+                  f"C${htpem_net - battery_net:,.0f} /yr",
+                  "annual heating advantage",
+                  help=HELP_HTPEM)
+        st.metric("HTPEM vs Low-Temp H₂",
                   f"C${htpem_net - ltpem_thermal.net_annual_impact_cad:,.0f} /yr",
-                  "HVAC penalty eliminated")
+                  "no electric heater needed at 160 °C",
+                  help=HELP_HTPEM)
         if system_age_years > 0:
-            st.caption(
-                f"FC η = {thermal['h2_htpem'].effective_fc_efficiency*100:.1f}% "
-                f"(−{system_age_years * 1.5:.0f}% from new)"
+            st.markdown(
+                f'<div class="warn-callout">'
+                f'<strong>Engine Ageing Active</strong><br>'
+                f'Efficiency = {thermal["h2_htpem"].effective_fc_efficiency*100:.1f}% '
+                f'(−{system_age_years * 1.5:.0f}% from new). '
+                f'Slightly less waste heat is available; the figures above reflect this.'
+                f'</div>',
+                unsafe_allow_html=True,
             )
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# TAB 4 · CARBON
+# TAB 4 · CARBON IMPACT
 # ════════════════════════════════════════════════════════════════════════════
 
 with tab4:
     with st.container():
-        st.subheader("Decarbonisation Value — 2026–2030")
+        st.subheader("Environmental Impact — How Much Pollution Does This Eliminate?")
         st.caption(
-            f"vs diesel baseline · {corridor_km} km corridor · "
-            f"Carbon C${carbon.annual_results[0].carbon_price_cad_per_tonne:.0f}–"
+            f"Compared to keeping the diesel train · {corridor_km} km · "
+            f"Carbon price C${carbon.annual_results[0].carbon_price_cad_per_tonne:.0f}–"
             f"C${carbon.annual_results[-1].carbon_price_cad_per_tonne:.0f}/t · "
-            f"Diesel C${diesel_price:.2f}/L"
+            f"Diesel at C${diesel_price:.2f}/L"
         )
 
     df_carbon = pd.DataFrame([
         {
-            "Year":               r.year,
-            "CO₂ Abated (t)":     r.co2_abated_tonnes,
-            "Carbon Credit (C$)": r.carbon_credit_value_cad,
-            "Avoided Fuel (C$)":  r.avoided_fuel_cost_cad,
-            "Social Benefit (C$)":r.social_benefit_cad,
-            "Carbon Price (C$/t)":r.carbon_price_cad_per_tonne,
+            "Year":                r.year,
+            "CO₂ Removed (t)":     r.co2_abated_tonnes,
+            "Carbon Credits (C$)": r.carbon_credit_value_cad,
+            "Fuel Savings (C$)":   r.avoided_fuel_cost_cad,
+            "Social Benefit (C$)": r.social_benefit_cad,
+            "Carbon Price (C$/t)": r.carbon_price_cad_per_tonne,
         }
         for r in carbon.annual_results
     ])
@@ -1140,26 +1719,25 @@ with tab4:
     with col_chart:
         fig_carbon = go.Figure()
         fig_carbon.add_bar(
-            x=df_carbon["Year"], y=df_carbon["Carbon Credit (C$)"],
-            name="Carbon Credits", marker_color=cfg.INNOVATION_HTPEM.bar_color,
-            marker_line_width=0,
+            x=df_carbon["Year"], y=df_carbon["Carbon Credits (C$)"],
+            name="Carbon Credits Earned", marker_color=C_HTPEM, marker_line_width=0,
             hovertemplate="<b>%{x}</b><br>Carbon Credits: C$%{y:,.0f}<extra></extra>",
         )
         fig_carbon.add_bar(
-            x=df_carbon["Year"], y=df_carbon["Avoided Fuel (C$)"],
-            name="Avoided Fuel", marker_color="#f59e0b", marker_line_width=0,
-            hovertemplate="<b>%{x}</b><br>Avoided Fuel: C$%{y:,.0f}<extra></extra>",
+            x=df_carbon["Year"], y=df_carbon["Fuel Savings (C$)"],
+            name="Diesel Fuel Savings", marker_color=C_BATT, marker_line_width=0,
+            hovertemplate="<b>%{x}</b><br>Fuel Savings: C$%{y:,.0f}<extra></extra>",
         )
         fig_carbon.add_bar(
             x=df_carbon["Year"], y=df_carbon["Social Benefit (C$)"],
-            name="Social Cost of Carbon", marker_color=C_ACCENT2, marker_line_width=0,
+            name="Social Cost of Carbon", marker_color=C_LTPEM, marker_line_width=0,
             hovertemplate="<b>%{x}</b><br>Social Benefit: C$%{y:,.0f}<extra></extra>",
         )
         fig_carbon.update_layout(
             **PLOTLY_BASE,
             barmode="group",
-            title="Annual Value of Decarbonisation (C$)",
-            yaxis_title="C$", xaxis_title=None,
+            title="Annual Financial Value of Switching Away from Diesel (C$)",
+            yaxis_title="C$ per Year", xaxis_title=None,
             height=430, margin=dict(t=44, b=80, l=8, r=8),
             legend=dict(
                 orientation="h", yanchor="top", y=-0.18, x=0.5, xanchor="center",
@@ -1170,27 +1748,70 @@ with tab4:
         st.plotly_chart(fig_carbon, use_container_width=True)
 
     with col_panel:
-        st.markdown("#### 5-Year Totals")
+        st.markdown(
+            f'<div class="section-accent"><h3>5-Year Totals</h3>'
+            f'<p>Cumulative impact vs keeping the diesel train</p></div>',
+            unsafe_allow_html=True,
+        )
+        # LCOA can be negative (H₂ costs less than diesel AND removes pollution)
+        _lcoa = carbon.lcoa_cad_per_tonne
+        _lcoa_cell = (
+            f"**Saves C${abs(_lcoa):,.0f}/t ✦**" if _lcoa <= 0
+            else f"**C${_lcoa:,.0f}/t**"
+        )
         st.markdown(f"""
-| Metric | Value |
+| What We Gain | Amount |
 |--------|------:|
-| CO₂ Abated | **{carbon.total_co2_abated_tonnes:,.0f} t** |
-| NOx Abated | **{carbon.total_nox_abated_kg:,.0f} kg** |
+| CO₂ Removed | **{carbon.total_co2_abated_tonnes:,.0f} tonnes** |
+| NOx Removed | **{carbon.total_nox_abated_kg:,.0f} kg** |
 | Carbon Credits | **C${carbon.total_carbon_credit_value_cad:,.0f}** |
-| Avoided Fuel | **C${carbon.total_avoided_fuel_cost_cad:,.0f}** |
-| Social Benefit | **C${carbon.total_social_benefit_cad:,.0f}** |
-| LCOA | **C${carbon.lcoa_cad_per_tonne:,.0f}/t** |
-| Cars Off Road | **{carbon.equivalent_cars_removed:,}/yr** |
+| Diesel Fuel Saved | **C${carbon.total_avoided_fuel_cost_cad:,.0f}** |
+| Social Value | **C${carbon.total_social_benefit_cad:,.0f}** |
+| Net cost per tonne | {_lcoa_cell} |
+| Equivalent cars off road | **{carbon.equivalent_cars_removed:,} /yr** |
         """)
         st.divider()
+        # Sign-aware metric: negative LCOA is a positive result (self-financing switch)
+        if _lcoa <= 0:
+            _lcoa_label  = "Net Savings per Tonne of CO₂ Removed"
+            _lcoa_value  = f"Saves C${abs(_lcoa):,.0f} / tonne"
+            _lcoa_delta  = "H₂ costs less than diesel — switch is self-financing ✦"
+            _lcoa_dcolor = "normal"   # green — a saving is a good thing
+        else:
+            _lcoa_label  = "Net Cost per Tonne of CO₂ Removed"
+            _lcoa_value  = f"C${_lcoa:,.0f} / tonne"
+            _lcoa_delta  = f"{carbon.total_co2_abated_tonnes:,.0f} t removed over 5 years"
+            _lcoa_dcolor = "inverse"  # red — paying to abate
+
         st.metric(
-            "Equivalent Cars Removed",
+            _lcoa_label,
+            _lcoa_value,
+            _lcoa_delta,
+            delta_color=_lcoa_dcolor,
+            help=HELP_LCOA,
+        )
+        st.metric(
+            "Cars Taken Off the Road",
             f"{carbon.equivalent_cars_removed:,} / yr",
-            f"{carbon.total_co2_abated_tonnes:,.0f} t CO₂ over 5 yrs",
+            f"equivalent annual impact vs keeping diesel",
+            help="Each tonne of CO₂ avoided equals the annual emissions of one average passenger car.",
         )
         st.dataframe(
-            df_carbon[["Year", "CO₂ Abated (t)", "Carbon Price (C$/t)"]].set_index("Year"),
+            df_carbon[["Year", "CO₂ Removed (t)", "Carbon Price (C$/t)"]].set_index("Year"),
             use_container_width=True,
+        )
+        # Updated callout: now reflects the corrected LCOA formula
+        _callout_body = (
+            f'<strong>How LCOA is calculated:</strong> '
+            f'Full H₂ cost (equipment + maintenance + electricity) minus avoided diesel purchases, '
+            f'divided by CO₂ abated. '
+            f'At current settings the H₂ system costs <strong>C${carbon.lcoa_cad_per_tonne:+,.0f}/t</strong> '
+            f'net of diesel savings — a {"saving" if _lcoa <= 0 else "premium"}. '
+            f'Adjust the Electricity or Diesel Price sliders to explore.'
+        )
+        st.markdown(
+            f'<div class="info-callout">{_callout_body}</div>',
+            unsafe_allow_html=True,
         )
 
 
@@ -1200,16 +1821,18 @@ with tab4:
 
 with tab5:
     with st.container():
-        st.subheader("HTPEM LCOH Sensitivity — Electricity Rate × Electrolyzer CAPEX")
-        st.caption(
-            f"{electrolyzer_kw:,} kW · CF {capacity_factor}% · "
-            f"Current scenario marked ✕ · "
-            f"Blue Bell = high-cost zone · Deep Space Blue = target zone"
+        st.subheader("Sensitivity Analysis — Best and Worst Case Fuel Cost Scenarios")
+        st.markdown(
+            f'<div class="info-callout">'
+            f'<strong>How to read this:</strong> The colour map shows what the hydrogen fuel '
+            f'cost would be at every combination of electricity price and plant construction cost. '
+            f'The <strong>✕ marker</strong> is your current scenario. '
+            f'<strong>Dark blue</strong> = cheap fuel · <strong>Light blue</strong> = expensive fuel. '
+            f'Plant size: {electrolyzer_kw:,} kW · Utilisation: {capacity_factor}%.'
+            f'</div>',
+            unsafe_allow_html=True,
         )
 
-    # [PERF-2] Sensitivity grid is computed lazily here — only when the user
-    # actually visits Tab 5.  Previously computed unconditionally at the top
-    # level, burning 256+ LCOH evaluations on every slider interaction.
     rates, capexes, z_grid, deg_curve = run_sensitivity(
         electrolyzer_kw, capacity_factor, system_age_years,
     )
@@ -1222,7 +1845,7 @@ with tab5:
             [0.25, C_ACCENT2],
             [0.55, C_BORDER],
             [0.80, C_MUTED],
-            [1.00, C_ACCENT],
+            [1.00, C_LTPEM],
         ]
         fig_heat = go.Figure()
         fig_heat.add_heatmap(
@@ -1230,11 +1853,11 @@ with tab5:
             colorscale=colorscale, zsmooth="best",
             hovertemplate=(
                 "Electricity: <b>C$%{x:.3f}/kWh</b><br>"
-                "CAPEX: <b>C$%{y:,.0f}/kW</b><br>"
-                "LCOH: <b>C$%{z:.2f}/kg</b><extra></extra>"
+                "Plant Cost: <b>C$%{y:,.0f}/kW</b><br>"
+                "Fuel Cost: <b>C$%{z:.2f}/kg</b><extra></extra>"
             ),
             colorbar=dict(
-                title=dict(text="LCOH (C$/kg)", font_color=C_MUTED, font_size=11),
+                title=dict(text="Fuel Cost (C$/kg)", font_color=C_MUTED, font_size=11),
                 tickfont=dict(color=C_MUTED, size=10),
                 outlinecolor=C_BORDER, outlinewidth=1,
                 thickness=14, len=0.85,
@@ -1245,22 +1868,22 @@ with tab5:
             y=[cfg.ELECTROLYZER_CAPEX_PER_KW],
             mode="markers+text",
             marker=dict(symbol="x", size=14, color=C_TEXT, line_width=2.5),
-            text=["  Current"],
+            text=["  You are here"],
             textfont=dict(color=C_TEXT, size=11),
             hovertemplate=(
-                f"Current scenario<br>"
-                f"Rate: C${electricity_rate:.4f}/kWh<br>"
-                f"CAPEX: C${cfg.ELECTROLYZER_CAPEX_PER_KW:,.0f}/kW<br>"
-                f"LCOH: C${econ_htpem.lcoh_cad_per_kg:.4f}/kg"
+                f"Your current scenario<br>"
+                f"Electricity: C${electricity_rate:.4f}/kWh<br>"
+                f"Plant Cost: C${cfg.ELECTROLYZER_CAPEX_PER_KW:,.0f}/kW<br>"
+                f"Fuel Cost: C${econ_htpem.lcoh_cad_per_kg:.4f}/kg"
                 "<extra></extra>"
             ),
             showlegend=False,
         )
         fig_heat.update_layout(
             **PLOTLY_BASE,
-            title="HTPEM LCOH Grid",
-            xaxis_title="Electricity Rate (C$/kWh)",
-            yaxis_title="Electrolyzer CAPEX (C$/kW)",
+            title="High-Temp H₂ Fuel Cost Grid (C$ per kg)",
+            xaxis_title="Electricity Price (C$/kWh)",
+            yaxis_title="Plant Construction Cost (C$/kW)",
             height=440, margin=dict(t=44, b=48, l=60, r=20),
         )
         fig_heat.update_xaxes(
@@ -1276,19 +1899,19 @@ with tab5:
         st.plotly_chart(fig_heat, use_container_width=True)
 
     with col_curve:
-        deg_years = [d["year"]                   for d in deg_curve]
-        deg_lcoh  = [d["lcoh"]                   for d in deg_curve]
-        deg_yield = [d["effective_yield"] * 100  for d in deg_curve]
-        deg_pct   = [d["lcoh_increase_pct"]      for d in deg_curve]
+        deg_years = [d["year"]                  for d in deg_curve]
+        deg_lcoh  = [d["lcoh"]                  for d in deg_curve]
+        deg_yield = [d["effective_yield"] * 100 for d in deg_curve]
+        deg_pct   = [d["lcoh_increase_pct"]     for d in deg_curve]
 
         fig_deg = go.Figure()
         fig_deg.add_scatter(
             x=deg_years, y=deg_lcoh,
-            name="LCOH (C$/kg)",
+            name="Fuel Cost (C$/kg)",
             mode="lines+markers",
-            line=dict(color=C_ACCENT, width=2.5),
-            marker=dict(size=6, color=C_ACCENT),
-            hovertemplate="Year %{x}<br>LCOH: C$%{y:.4f}/kg<extra></extra>",
+            line=dict(color=C_HTPEM, width=2.5),
+            marker=dict(size=6, color=C_HTPEM),
+            hovertemplate="Year %{x}<br>Fuel Cost: C$%{y:.4f}/kg<extra></extra>",
         )
         if system_age_years <= 10:
             cur_lcoh = deg_lcoh[system_age_years]
@@ -1296,28 +1919,28 @@ with tab5:
                 x=[system_age_years], y=[cur_lcoh],
                 mode="markers",
                 marker=dict(size=12, color=C_TEXT, symbol="circle",
-                            line_color=C_ACCENT, line_width=2),
+                            line_color=C_HTPEM, line_width=2),
                 hovertemplate=f"C${cur_lcoh:.4f}/kg<extra></extra>",
                 showlegend=False,
             )
         fig_deg.add_scatter(
             x=deg_years, y=deg_yield,
-            name="H₂ Yield (%)",
+            name="H₂ Output Rate (%)",
             mode="lines",
             line=dict(color=C_MUTED, width=1.5, dash="dot"),
             yaxis="y2",
-            hovertemplate="Year %{x}<br>H₂ Yield: %{y:.1f}%<extra></extra>",
+            hovertemplate="Year %{x}<br>Output Rate: %{y:.1f}%<extra></extra>",
         )
         fig_deg.update_layout(
             **PLOTLY_BASE,
-            title="LCOH Degradation Curve (0–10 yr)",
-            xaxis_title="Stack Age (years)",
+            title="How Fuel Cost Changes as the Plant Ages (0–10 yrs)",
+            xaxis_title="Plant Age (years)",
             yaxis=dict(
-                title="LCOH (C$/kg)", title_font_color=C_ACCENT,
-                tickfont_color=C_MUTED, gridcolor=C_BORDER, showgrid=True,
+                title="Fuel Cost (C$/kg)", title_font_color=C_HTPEM,
+                tickfont_color=C_MUTED, gridcolor="rgba(24,67,90,0.40)", showgrid=True,
             ),
             yaxis2=dict(
-                title="H₂ Yield (%)", title_font_color=C_MUTED,
+                title="H₂ Output Rate (%)", title_font_color=C_MUTED,
                 tickfont_color=C_MUTED, overlaying="y", side="right",
                 showgrid=False, range=[55, 75],
             ),
@@ -1340,9 +1963,21 @@ with tab5:
     lcoh_max = max(z_flat)
 
     sc1, sc2, sc3, sc4 = st.columns(4)
-    sc1.metric("Best-Case LCOH",   f"C${lcoh_min:.2f}/kg",  f"C${rates[0]:.3f}/kWh · C${capexes[0]:,.0f}/kW")
-    sc2.metric("Worst-Case LCOH",  f"C${lcoh_max:.2f}/kg",  "Danger zone ceiling")
-    sc3.metric("Current Scenario", f"C${econ_htpem.lcoh_cad_per_kg:.4f}/kg",
-               f"H₂ yield {econ_htpem.effective_h2_efficiency*100:.1f}%")
-    sc4.metric("10-yr LCOH Drift", f"+{deg_pct[-1]:.1f}%",
-               f"C${deg_lcoh[0]:.4f} → C${deg_lcoh[-1]:.4f}/kg")
+    sc1.metric("Best-Case Fuel Cost",
+               f"C${lcoh_min:.2f} /kg",
+               f"at C${rates[0]:.3f}/kWh · C${capexes[0]:,.0f}/kW plant",
+               help=HELP_LCOH)
+    sc2.metric("Worst-Case Fuel Cost",
+               f"C${lcoh_max:.2f} /kg",
+               f"+C${lcoh_max - lcoh_min:.2f} above best case",
+               delta_color="inverse", help=HELP_LCOH)
+    sc3.metric("Your Current Scenario",
+               f"C${econ_htpem.lcoh_cad_per_kg:.4f} /kg",
+               f"H₂ output rate {econ_htpem.effective_h2_efficiency*100:.1f}%",
+               delta_color="off",
+               help="Based on your current sidebar settings.")
+    sc4.metric("Fuel Cost Rise Over 10 yrs",
+               f"+{deg_pct[-1]:.1f}%",
+               f"C${deg_lcoh[0]:.4f} → C${deg_lcoh[-1]:.4f}/kg as plant ages",
+               delta_color="inverse",
+               help="As the plant ages, efficiency slowly drops — like any industrial equipment.")

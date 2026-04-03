@@ -146,8 +146,18 @@ class CarbonAbatementCalculator:
         total_social  = sum(r.social_benefit_cad       for r in results)
         total_fuel    = sum(r.avoided_fuel_cost_cad    for r in results)
 
-        # LCOA = total system cost / total CO₂ abated [ARCH-1]
-        lcoa = (self.annual_h2_cost_cad * n_years) / total_co2 if total_co2 > 0 else 0.0
+        # LCOA = net incremental cost to decarbonise ÷ CO₂ abated.
+        #
+        # [LCOA-1 FIX] Previous formula:
+        #   lcoa = (annual_h2_cost_cad × n_years) / total_co2
+        # This omitted the avoided diesel fuel savings, making LCOA appear ~10× too high
+        # and misrepresenting the economics. The correct calculation credits the diesel
+        # fuel no longer purchased against the H₂ system cost:
+        #   net_cost = (annual_h2_cost × n_years) − total_fuel_saved
+        # A negative result is physically valid and means switching to H₂ costs LESS
+        # than continuing to buy diesel — the switch is self-financing.
+        net_h2_cost = (self.annual_h2_cost_cad * n_years) - total_fuel
+        lcoa = net_h2_cost / total_co2 if total_co2 > 0 else 0.0
 
         # Average annual CO₂ abated ÷ EPA car benchmark (4.6 t/yr/car).
         # [MATH-1] round() instead of int() — prevents 0 result on short corridors

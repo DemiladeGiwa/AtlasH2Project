@@ -248,7 +248,11 @@ class EconomicsEngine:
         itc_savings    = adjusted_capex * self.itc_rate
         net_capex      = adjusted_capex - itc_savings
 
-        annual_opex      = gross_capex * self.opex_rate
+        # [ECON-1 FIX] OPEX is a fraction of the cost of equipment actually purchased
+        # (adjusted_capex), not of the pre-discount gross price.  For HTPEM the PSA
+        # purification unit has been eliminated; maintaining it on gross_capex added
+        # ~C$900/yr in phantom maintenance cost for equipment that doesn't exist.
+        annual_opex      = adjusted_capex * self.opex_rate
         annual_hours     = 8_760.0 * cf
         annual_elec_kwh  = self.electrolyzer_size_kw * annual_hours
         annual_elec_cost = annual_elec_kwh * rate
@@ -298,7 +302,23 @@ class ThermalEfficiencyModule:
     """Quantifies the annual thermal energy impact for all four profiles."""
 
     HTPEM_THRESHOLD_C: float       = 100.0  # min stack temp [°C] for waste-heat cabin heating
-    BUILDING_HEAT_LOSS_COEFF: float = 0.15  # kW / °C cabin thermal conductance
+
+    # [THERM-1 FIX] Calibrated from first principles: the LTPEM/Battery profiles both carry
+    # a 50 kW electric HVAC unit (cfg.BASELINE_LTPEM.hvac_power_draw_kw) sized for the
+    # SJ-Moncton design-point ΔT of 30 °C (cabin 20 °C − winter −10 °C).
+    # → BUILDING_HEAT_LOSS_COEFF = 50 kW / 30 °C = 1.6̄67 kW/°C.
+    #
+    # Previous value (0.15 kW/°C) gave cabin_demand = 4.5 kW at −10 °C, 11× below the
+    # 50 kW HVAC draw used for the LTPEM/Battery penalty.  That asymmetry caused
+    # HTPEM's waste-heat savings to be understated by the same factor (~11×), while
+    # the LTPEM/Battery penalty was computed correctly.  With the corrected coefficient:
+    #   cabin_demand(−10 °C) = 1.6̄67 × 30 = 50 kW  (matches HVAC rated power)
+    #   HTPEM elec_saved/trip = 50 kW × 1.75 hr = 87.5 kWh  ✓
+    #   LTPEM hvac_kwh/trip   = 50 kW × 1.75 hr = 87.5 kWh  ✓  (same model, symmetric)
+    BUILDING_HEAT_LOSS_COEFF: float = (
+        cfg.BASELINE_LTPEM.hvac_power_draw_kw
+        / (cfg.CABIN_TARGET_TEMP_C - cfg.WINTER_AMBIENT_TEMP_C)
+    )  # = 50 / 30 ≈ 1.6667 kW/°C
 
     def __init__(
         self,
@@ -504,7 +524,8 @@ class SensitivityEngine:
             bop_saving       = gross_capex * bop_discount_rate
             adj_capex        = gross_capex - bop_saving
             net_capex        = adj_capex - adj_capex * itc_rate
-            annual_opex      = gross_capex * opex_rate
+            # [ECON-1 FIX] OPEX on adj_capex — mirrors EconomicsEngine fix for algebraic equivalence.
+            annual_opex      = adj_capex * opex_rate
             base_fixed_costs = net_capex + (annual_opex * self.ANALYSIS_PERIOD_YEARS)
 
             row: list[float] = []
