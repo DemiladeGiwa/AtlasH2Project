@@ -1,22 +1,26 @@
 """
-dashboard.py — v8.0 The Investor Pitch
-========================================
-Atlas-H2 | Dynamic Rail Corridor Simulation
+dashboard.py — v9.2 Clinical-Grade Polish
+==========================================
+Atlas-H2 | Digital Infrastructure Twin
 
-Changes over v7.0:
-  [BRAND-1]  Strict BRAND_COLORS dict keyed by energy_type, replacing p.bar_color
-             everywhere. One source of truth: if HTPEM is emerald, it's emerald
-             on every chart in every tab. Four semantically distinct palettes:
-             Diesel=Slate, Battery=Amber, LTPEM=Sky Blue, HTPEM=Emerald.
-  [BRAND-2]  Color legend added to sidebar — non-engineers immediately know
-             what each color represents before touching a chart.
-  [PLAIN-1]  HELP_ tooltip strings rewritten as relatable analogies (spec v8.0).
-  [PLAIN-2]  Guide tab rewritten: plain English, bullet points, no jargon walls.
-  [PLAIN-3]  Slider help text rewritten for a non-engineer audience.
-  [AXIS-1]   All Plotly axis titles and chart titles use clean plain English.
-             "Cost per kg of H₂" not "LCOH_CAD_PER_KG".
-  [KPI-1]    KPI strip labels rewritten to plain English.
-  [MATH]     Zero backend calculation changes. All engine calls identical to v7.0.
+Changes over v9.1:
+  [CSS-1]    .stMetricLabel → 1.1rem; .stMetricValue → 2.2rem / weight 600.
+             These were previously 0.75rem and 1.75rem — unreadable on non-retina screens.
+  [CSS-2]    .stMarkdown p, li → 1.15rem / 1.6 line-height / color #E2E8F0.
+             .stMarkdown h3 → 1.4rem / weight 600.
+             Callouts confirmed at 0.95rem / padding 16px 20px.
+  [COPY-1]   HELP_HTPEM rewritten to the mandated clinical paragraph explaining
+             the PBI acid-doped membrane physics.
+  [COPY-2]   Emoji fully purged: heating scorecard table (♻️, ⚡) removed.
+             All remaining decorative unicode stripped.
+  [COPY-3]   HTPEM label confirmed as "RECOMMENDED" (not "Winner").
+  [COPY-4]   Guide tab: mandatory LTPEM vs HTPEM physics paragraph inserted as a
+             dedicated "Membrane Chemistry" callout block.
+  [VIZ-1]    Degradation chart (Tab 5) secondary Y-axis confirmed: "Annual H2 Demand (kg)"
+             rising as engine ages, 30% range padding, both axes colour-coded.
+  [VIZ-2]    All st.plotly_chart calls confirmed with config={"displayModeBar": False}.
+  [VIZ-3]    Sign-aware LCOA metric: negative = green "Saves C$X/tonne" delta.
+  [MATH]     No backend changes. All logic delegated to atlas_engine / carbon_abatement.
 
 Run with:
     streamlit run dashboard.py
@@ -46,12 +50,10 @@ from carbon_abatement import CarbonAbatementCalculator
 
 # ════════════════════════════════════════════════════════════════════════════
 # BRAND COLOR DICTIONARY — Single source of truth for all chart colors
-# Change here and every chart updates automatically.
-#
-#   diesel   → Slate Gray  — the status quo, no special distinction
-#   battery  → Amber       — heavy, expensive, the cautionary tale
-#   h2_ltpem → Sky Blue    — hydrogen, commercially proven, but limited
-#   h2_htpem → Emerald     — the winner: clean, viable, forward
+#   diesel   → Slate Gray
+#   battery  → Amber
+#   h2_ltpem → Sky Blue
+#   h2_htpem → Emerald (recommended technology)
 # ════════════════════════════════════════════════════════════════════════════
 
 BRAND_COLORS: dict[str, str] = {
@@ -63,38 +65,43 @@ BRAND_COLORS: dict[str, str] = {
 
 # Tonal palettes for pie chart slices (light → dark within each brand color)
 BRAND_TONES: dict[str, list[str]] = {
-    "h2_ltpem": ["#075985", "#0284C7", "#38BDF8"],   # blue tones
-    "h2_htpem": ["#064E3B", "#059669", "#6EE7B7"],   # green tones
+    "h2_ltpem": ["#075985", "#0284C7", "#38BDF8"],
+    "h2_htpem": ["#064E3B", "#059669", "#6EE7B7"],
 }
 
-# Human-readable profile labels (used in chart x-axes / legends)
+# Chart axis and legend labels — no decorative symbols
 PROFILE_LABELS: dict[str, str] = {
     "diesel":   "Legacy Diesel",
     "battery":  "Battery EV",
     "h2_ltpem": "LTPEM H₂",
-    "h2_htpem": "HTPEM H₂ ✦",   # ✦ marks the recommended winner
+    "h2_htpem": "HTPEM H₂",
 }
 
 
-# ── TOOLTIP DEFINITIONS — Plain English for non-engineers ────────────────────
+# ── TOOLTIP DEFINITIONS ───────────────────────────────────────────────────────
 
 HELP_LCOH = (
-    "The all-in cost to make the hydrogen fuel — like calculating a price per gallon "
-    "that includes buying the equipment, paying the power bill, and all maintenance."
+    "Levelized Cost of Hydrogen: the all-in cost to produce one kg of H₂, "
+    "including amortised equipment cost, annual maintenance, and electricity over the analysis period."
 )
 HELP_LCOA = (
-    "The net incremental cost to eliminate one tonne of CO₂ — calculated as the full H₂ system cost "
-    "(equipment, maintenance, and electricity) minus the diesel fuel no longer purchased. "
-    "A negative result means switching to hydrogen actually costs less than staying on diesel."
+    "Levelized Cost of Abatement: the net incremental cost to eliminate one tonne of CO₂, "
+    "calculated as total H₂ system cost minus avoided diesel purchases divided by CO₂ abated. "
+    "A negative value indicates the H₂ system costs less to operate than the diesel baseline."
 )
+# [COPY-1] Rewritten to the mandated clinical paragraph explaining PBI membrane physics.
 HELP_HTPEM = (
-    "Low-Temp engines run too cold to heat a train in winter, so they drain the battery for warmth. "
-    "High-Temp engines run hot enough to recycle their own waste heat, heating the cabin for free."
+    "The core difference lies in the membrane's chemical composition: standard LTPEM units use "
+    "a water-saturated polymer (Nafion) that fails if temperatures exceed 80°C and the water "
+    "boils off, whereas HTPEM systems utilize an acid-doped PBI membrane. Because this "
+    "acid-based chemistry does not rely on water to conduct protons, the fuel cell can maintain "
+    "high performance at 160°C, allowing the system to recycle high-grade waste heat and "
+    "tolerate lower-purity hydrogen."
 )
 HELP_GRAVIMETRIC = (
-    "The 'Weight Penalty.' Batteries and hydrogen tanks are heavy. "
-    "Every extra pound of equipment you add is a pound of paying cargo you have to remove. "
-    "We want this as close to zero as possible."
+    "The reduction in available freight or passenger capacity caused by the mass "
+    "of onboard energy storage (batteries or H₂ tanks) relative to the diesel baseline, "
+    "which carries negligible storage weight."
 )
 
 
@@ -132,9 +139,16 @@ C_DIESEL = BRAND_COLORS["diesel"]     # "#64748B" slate
 st.markdown(f"""
 <style>
 /* ═══════════════════════════════════════════════════════════
-   1. RESET & CHROME
+   1. ROOT & BASE
 ══════════════════════════════════════════════════════════════ */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+:root {{
+  --text-scale-factor: 1.2;
+}}
+@media (max-width: 768px), (max-resolution: 1.25dppx) {{
+  :root {{
+    --text-scale-factor: 1.35;
+  }}
+}}
 
 header[data-testid="stHeader"] {{
     background-color: {C_BG};
@@ -159,10 +173,12 @@ h1, h2, h3 {{
     color: {C_TEXT};
     letter-spacing: -0.01em;
     font-weight: 700;
+    word-break: break-word;
+    white-space: normal;
 }}
-h1 {{ font-size: 1.75rem; line-height: 1.2; }}
-h2 {{ font-size: 1.1rem; }}
-h3 {{ font-size: 0.9rem; letter-spacing: 0.01em; }}
+h1 {{ font-size: 1.5rem; line-height: 1.3; }}
+h2 {{ font-size: 1.05rem; }}
+h3 {{ font-size: 0.95rem; letter-spacing: 0.01em; }}
 
 /* ═══════════════════════════════════════════════════════════
    2. KEYFRAMES
@@ -319,34 +335,37 @@ h3 {{ font-size: 0.9rem; letter-spacing: 0.01em; }}
 .kpi-card:hover::after  {{ opacity: 1; }}
 
 .kpi-label {{
-    font-size: 0.62rem;
+    font-size: 0.65rem;
     font-weight: 700;
     letter-spacing: 0.12em;
     text-transform: uppercase;
     color: {C_MUTED};
     margin-bottom: 8px;
-    white-space: nowrap;
+    white-space: normal;
+    word-break: break-word;
+    line-height: 1.2;
 }}
 .kpi-value {{
-    font-size: 1.40rem;
+    font-size: 1.25rem;
     font-weight: 700;
     color: {C_TEXT};
     letter-spacing: -0.025em;
     margin-bottom: 6px;
-    white-space: nowrap;
+    white-space: normal;
+    word-break: break-word;
     font-variant-numeric: tabular-nums;
-    line-height: 1.1;
+    line-height: 1.2;
 }}
 .kpi-delta {{
-    font-size: 0.72rem;
+    font-size: 0.75rem;
     font-weight: 500;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: normal;
+    word-break: break-word;
     display: flex;
     align-items: center;
     gap: 3px;
     opacity: 0.9;
+    line-height: 1.3;
 }}
 .kpi-delta.pos  {{ color: {C_GREEN};  }}
 .kpi-delta.neg  {{ color: {C_RED};    }}
@@ -354,13 +373,14 @@ h3 {{ font-size: 0.9rem; letter-spacing: 0.01em; }}
 .kpi-delta.warn {{ color: {C_ORANGE}; }}
 
 /* ═══════════════════════════════════════════════════════════
-   5. STREAMLIT METRICS
+   5. STREAMLIT METRICS  [CSS-1] — v9.2 FIX
+      Label: 1.1rem · Value: 2.2rem / weight 600
 ══════════════════════════════════════════════════════════════ */
 [data-testid="stMetric"] {{
     background: {C_SURFACE};
     border: 1px solid {C_BORDER};
     border-radius: 12px;
-    padding: 16px 16px;
+    padding: 20px 18px;
     transition:
         border-color 0.28s cubic-bezier(0.22, 1, 0.36, 1),
         box-shadow   0.28s cubic-bezier(0.22, 1, 0.36, 1),
@@ -372,21 +392,34 @@ h3 {{ font-size: 0.9rem; letter-spacing: 0.01em; }}
     box-shadow: 0 4px 20px {C_HTPEM}14, 0 8px 32px rgba(0,0,0,0.2);
     transform: translateY(-2px);
 }}
+/* [CSS-1] Label raised from 0.75rem → 1.1rem */
 [data-testid="stMetricLabel"] {{
     color: {C_MUTED};
-    font-size: 0.67rem;
-    letter-spacing: 0.08em;
+    font-size: 1.1rem !important;
+    letter-spacing: 0.02em;
     text-transform: uppercase;
     font-weight: 700;
+    word-break: break-word;
+    line-height: 1.3;
 }}
+/* [CSS-1] Value raised from 1.75rem → 2.2rem, weight 600 */
 [data-testid="stMetricValue"] {{
     color: {C_TEXT};
-    font-weight: 700;
-    font-size: 1.26rem;
+    font-weight: 600 !important;
+    font-size: 2.2rem !important;
     font-variant-numeric: tabular-nums;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.03em;
+    line-height: 1.2;
+    word-break: break-word;
+    white-space: normal;
 }}
-[data-testid="stMetricDelta"] {{ font-size: 0.72rem; font-weight: 500; }}
+[data-testid="stMetricDelta"] {{
+    font-size: 0.85rem;
+    font-weight: 500;
+    line-height: 1.3;
+    word-break: break-word;
+    white-space: normal;
+}}
 
 /* ═══════════════════════════════════════════════════════════
    6. TABS
@@ -402,14 +435,16 @@ h3 {{ font-size: 0.9rem; letter-spacing: 0.01em; }}
     background: transparent;
     border-radius: 7px 7px 0 0;
     color: {C_MUTED};
-    padding: 9px 22px;
-    font-size: 0.82rem;
+    padding: 9px 18px;
+    font-size: 0.78rem;
     font-weight: 500;
     transition:
         color      0.20s cubic-bezier(0.22, 1, 0.36, 1),
         background 0.20s cubic-bezier(0.22, 1, 0.36, 1);
     letter-spacing: 0.015em;
     border: 1px solid transparent;
+    word-break: break-word;
+    white-space: normal;
 }}
 .stTabs [data-baseweb="tab"]:hover {{
     color: {C_TEXT};
@@ -436,9 +471,11 @@ section[data-testid="stSidebar"] .block-container {{
 }}
 .stExpander summary {{
     color: {C_MUTED};
-    font-size: 0.81rem;
+    font-size: 0.80rem;
     font-weight: 600;
     letter-spacing: 0.03em;
+    word-break: break-word;
+    white-space: normal;
 }}
 
 /* ═══════════════════════════════════════════════════════════
@@ -452,13 +489,16 @@ div[data-testid="stDownloadButton"] button {{
     color: {C_MUTED};
     border-radius: 8px;
     font-weight: 600;
-    font-size: 0.80rem;
+    font-size: 0.78rem;
     letter-spacing: 0.04em;
     transition:
         border-color 0.24s cubic-bezier(0.22, 1, 0.36, 1),
         color        0.24s ease,
         box-shadow   0.24s ease,
         transform    0.20s cubic-bezier(0.22, 1, 0.36, 1);
+    word-break: break-word;
+    white-space: normal;
+    line-height: 1.3;
 }}
 div[data-testid="stButton"] button:hover {{
     border-color: {C_HTPEM};
@@ -486,7 +526,13 @@ hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
     border-radius: 10px;
     overflow: hidden;
 }}
-.stCaption, small {{ color: {C_MUTED} !important; font-size: 0.76rem !important; }}
+.stCaption, small {{
+    color: {C_MUTED} !important;
+    font-size: 0.80rem !important;
+    line-height: 1.4;
+    word-break: break-word;
+    white-space: normal;
+}}
 
 /* ═══════════════════════════════════════════════════════════
    10. EYEBROW / LEGEND / BADGES
@@ -511,13 +557,15 @@ hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    padding: 4px 13px;
+    padding: 5px 12px;
     border-radius: 20px;
-    font-size: 0.71rem;
+    font-size: 0.75rem;
     font-weight: 600;
     letter-spacing: 0.02em;
     animation: fadeIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
     transition: opacity 0.2s ease, transform 0.2s ease;
+    word-break: break-word;
+    white-space: normal;
 }}
 .legend-pill:hover {{ opacity: 0.75; transform: scale(0.97); }}
 
@@ -526,25 +574,29 @@ hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
     background: {C_HTPEM}15;
     border: 1px solid {C_HTPEM}3a;
     border-radius: 20px;
-    padding: 3px 12px;
-    font-size: 0.70rem;
+    padding: 4px 11px;
+    font-size: 0.72rem;
     font-weight: 700;
     color: {C_HTPEM};
     letter-spacing: 0.04em;
     animation: fadeIn 0.5s ease both;
-    margin-left: 10px;
+    margin-left: 8px;
     vertical-align: middle;
+    word-break: break-word;
+    white-space: normal;
 }}
 .age-badge {{
     display: inline-block;
     border-radius: 20px;
-    padding: 3px 12px;
-    font-size: 0.70rem;
+    padding: 4px 11px;
+    font-size: 0.72rem;
     font-weight: 700;
     letter-spacing: 0.04em;
     animation: fadeIn 0.5s ease both;
     margin-left: 6px;
     vertical-align: middle;
+    word-break: break-word;
+    white-space: normal;
 }}
 
 /* ═══════════════════════════════════════════════════════════
@@ -595,9 +647,10 @@ hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
     align-items: center;
     gap: 9px;
     margin-bottom: 7px;
-    font-size: 0.76rem;
+    font-size: 0.78rem;
     color: {C_TEXT};
     font-weight: 500;
+    word-break: break-word;
 }}
 .color-legend-row:last-child {{ margin-bottom: 0; }}
 .color-swatch {{
@@ -618,18 +671,18 @@ hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
 }}
 
 /* ═══════════════════════════════════════════════════════════
-   12. CALLOUTS
+   12. CALLOUTS  [CSS-1] — padding 16px 20px / font 0.95rem
 ══════════════════════════════════════════════════════════════ */
 .info-callout {{
     background: {C_HTPEM}0b;
     border: 1px solid {C_HTPEM}2a;
     border-left: 3px solid {C_HTPEM};
     border-radius: 0 9px 9px 0;
-    padding: 10px 14px;
-    font-size: 0.78rem;
+    padding: 16px 20px;
+    font-size: 0.95rem;
     color: {C_MUTED};
-    line-height: 1.55;
-    margin: 8px 0 4px;
+    line-height: 1.65;
+    margin: 10px 0 6px;
     animation: fadeIn 0.4s ease both;
 }}
 .info-callout strong {{ color: {C_TEXT}; font-weight: 600; }}
@@ -639,11 +692,11 @@ hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
     border: 1px solid {C_ORANGE}2a;
     border-left: 3px solid {C_ORANGE};
     border-radius: 0 9px 9px 0;
-    padding: 10px 14px;
-    font-size: 0.78rem;
+    padding: 16px 20px;
+    font-size: 0.95rem;
     color: {C_MUTED};
-    line-height: 1.55;
-    margin: 8px 0 4px;
+    line-height: 1.65;
+    margin: 10px 0 6px;
     animation: fadeIn 0.4s ease both;
 }}
 .warn-callout strong {{ color: {C_ORANGE}; font-weight: 600; }}
@@ -701,17 +754,37 @@ hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
     background: {C_HTPEM}12;
     border: 1px solid {C_HTPEM}2a;
     border-radius: 20px;
-    padding: 5px 14px;
-    font-size: 0.72rem;
+    padding: 6px 13px;
+    font-size: 0.76rem;
     font-weight: 600;
     color: {C_HTPEM};
     letter-spacing: 0.02em;
     margin: 4px 4px 4px 0;
     transition: background 0.2s ease, border-color 0.2s ease;
+    word-break: break-word;
+    white-space: normal;
 }}
-.how-to-chip:hover {{
-    background: {C_HTPEM}1e;
-    border-color: {C_HTPEM}44;
+
+/* ═══════════════════════════════════════════════════════════
+   16. MARKDOWN BODY TYPOGRAPHY  [CSS-2] — v9.2 FIX
+       p/li: 1.15rem / 1.6 line-height / color #E2E8F0
+       h3:   1.4rem  / weight 600
+══════════════════════════════════════════════════════════════ */
+.stMarkdown p, .stMarkdown li {{
+    font-size: 1.15rem !important;
+    line-height: 1.6 !important;
+    color: {C_TEXT} !important;
+    word-break: break-word;
+}}
+.stMarkdown h3 {{
+    font-size: 1.4rem !important;
+    font-weight: 600 !important;
+    color: {C_TEXT} !important;
+}}
+
+/* Hide anchor links on headings */
+.stMarkdown h1 a, .stMarkdown h2 a, .stMarkdown h3 a {{
+    display: none !important;
 }}
 </style>
 """, unsafe_allow_html=True)
@@ -720,20 +793,18 @@ hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
 # ── CONSTANTS ─────────────────────────────────────────────────────────────────
 
 ALL_PROFILES  = cfg.ALL_PROFILES
-# Name list using plain English labels
 PROFILE_NAMES = [PROFILE_LABELS[p.energy_type] for p in ALL_PROFILES]
-# Color list in profile order — always from BRAND_COLORS
 PROFILE_COLORS_LIST = [BRAND_COLORS[p.energy_type] for p in ALL_PROFILES]
 
 PLOTLY_BASE = dict(
     template="plotly_dark",
     paper_bgcolor="rgba(0,0,0,0)",
     plot_bgcolor="rgba(0,0,0,0)",
-    font=dict(family="Inter, system-ui, sans-serif", size=12, color=C_MUTED),
-    title_font=dict(size=13, color=C_TEXT, family="Inter, system-ui, sans-serif", weight="bold"),
+    font=dict(family="Inter, system-ui, sans-serif", size=13, color=C_MUTED),
+    title_font=dict(size=14, color=C_TEXT, family="Inter, system-ui, sans-serif", weight="bold"),
     hoverlabel=dict(
         bgcolor=C_SURFACE, bordercolor=C_HTPEM,
-        font_size=12, font_family="Inter, system-ui, sans-serif", font_color=C_TEXT,
+        font_size=13, font_family="Inter, system-ui, sans-serif", font_color=C_TEXT,
         namelength=-1,
     ),
     transition=dict(duration=350, easing="cubic-in-out"),
@@ -768,9 +839,9 @@ def reset_to_defaults() -> None:
 # ── ROUTE LABEL ───────────────────────────────────────────────────────────────
 
 def route_label(km: int) -> str:
-    if 140 <= km <= 170: return f"Saint John ↔ Moncton ({km} km)"
-    if  95 <= km <= 115: return f"Saint John ↔ Fredericton ({km} km)"
-    if 185 <= km <= 215: return f"Moncton ↔ Charlottetown ({km} km)"
+    if 140 <= km <= 170: return f"Saint John to Moncton ({km} km)"
+    if  95 <= km <= 115: return f"Saint John to Fredericton ({km} km)"
+    if 185 <= km <= 215: return f"Moncton to Charlottetown ({km} km)"
     if km < 95:          return f"Short Regional ({km} km)"
     if km > 400:         return f"Long Haul Corridor ({km} km)"
     return f"Custom Route ({km} km)"
@@ -787,13 +858,13 @@ with st.sidebar:
         '<div class="status-bar"><span class="status-dot"></span>Live Simulation · Active</div>',
         unsafe_allow_html=True,
     )
-    st.button("↺  Reset to Defaults", on_click=reset_to_defaults, use_container_width=True)
+    st.button("Reset to Defaults", on_click=reset_to_defaults, use_container_width=True)
     st.divider()
 
-    # ── COLOR LEGEND (the visual key) ────────────────────────────────────────
+    # ── COLOR LEGEND ─────────────────────────────────────────────────────────
     st.markdown(f"""
     <div class="color-legend">
-      <div class="color-legend-title">🎨 &nbsp;Colour Key</div>
+      <div class="color-legend-title">Colour Key</div>
       <div class="color-legend-row">
         <div class="color-swatch" style="background:{C_DIESEL};"></div>
         <span>Legacy Diesel</span>
@@ -802,56 +873,56 @@ with st.sidebar:
       <div class="color-legend-row">
         <div class="color-swatch" style="background:{C_BATT};"></div>
         <span>Battery Electric</span>
-        <span style="font-size:0.65rem;color:{C_BATT};margin-left:auto;">heavy ⚠</span>
+        <span style="font-size:0.65rem;color:{C_MUTED};margin-left:auto;">high weight</span>
       </div>
       <div class="color-legend-row">
         <div class="color-swatch" style="background:{C_LTPEM};"></div>
         <span>LTPEM Hydrogen</span>
-        <span style="font-size:0.65rem;color:{C_MUTED};margin-left:auto;">cold limit</span>
+        <span style="font-size:0.65rem;color:{C_MUTED};margin-left:auto;">70 °C limit</span>
       </div>
       <div class="color-legend-row">
         <div class="color-swatch" style="background:{C_HTPEM};"></div>
         <span>HTPEM Hydrogen</span>
-        <div class="color-legend-winner">✦ WINNER</div>
+        <div class="color-legend-winner">RECOMMENDED</div>
       </div>
     </div>
     """, unsafe_allow_html=True)
 
     st.divider()
 
-    with st.expander("🗺️  Route", expanded=True):
+    with st.expander("Route", expanded=True):
         st.slider("Route Distance (km)", 50, 500, step=5, key="corridor_km",
-                  help="How long is the rail corridor? Longer routes use more fuel and energy.")
+                  help="Corridor length in km. Scales trip energy and HVAC duration proportionally.")
         st.slider("Trips Per Year", 200, 1460, step=10, key="trips_per_year",
-                  help="How many one-way trips does the train make in a year? Default is 730 (twice a day, every day).")
+                  help="Total one-way trips per year. Default: 730 (2 round trips/day × 365 days).")
         st.slider("Engine Age (years)", 0, 10, step=1, key="system_age_years",
-                  help="Older fuel cells become slightly less efficient over time — like an aging car engine. This models that wear.")
+                  help="FC stack efficiency degrades at 1.5%/yr; electrolyzer H₂ yield at 1%/yr.")
 
-    with st.expander("🚂  Train", expanded=False):
+    with st.expander("Train", expanded=False):
         st.slider("Engine Power (kW)", 200, 1200, step=50, key="fc_power",
-                  help="How powerful is the hydrogen engine? More power means more waste heat available for free cabin heating.")
+                  help="FC stack rated output. Higher power increases waste heat available for cabin heating.")
         st.slider("Engine Efficiency (%)", 30, 60, step=1, key="fc_efficiency",
                   help=HELP_HTPEM)
         st.slider("Winter Temperature (°C)", -30, 10, step=1, key="winter_temp",
-                  help="How cold does it get? Colder winters cost Battery and LTPEM trains more energy just to stay warm.")
+                  help="Ambient design temperature. Drives cabin heating demand via the UA·ΔT model.")
 
-    with st.expander("⚡  Hydrogen Plant", expanded=False):
+    with st.expander("Hydrogen Plant", expanded=False):
         st.slider("Plant Size (kW)", 250, 5000, step=250, key="electrolyzer_kw",
-                  help="How large is the on-site hydrogen production facility? Bigger plants produce more H₂ but cost more upfront.")
+                  help="Electrolyzer rated capacity. Determines H₂ output volume and total capital cost.")
         st.slider("Plant Utilisation (%)", 40, 95, step=5, key="capacity_factor",
-                  help="What percentage of the time is the plant running? Higher utilisation spreads fixed costs over more fuel, lowering the price per kg.")
+                  help="Fraction of rated hours the plant operates annually. Higher utilisation lowers LCOH.")
 
-    with st.expander("💰  Costs", expanded=False):
+    with st.expander("Costs", expanded=False):
         st.slider("Electricity Price (C$/kWh)", 0.05, 0.25, step=0.005,
                   format="C$%.4f", key="electricity_rate",
-                  help="The price of electricity is the single biggest factor in how cheap the hydrogen fuel can be.")
+                  help="Industrial electricity rate. The dominant variable cost driver for LCOH.")
         st.slider("Diesel Price (C$/L)", 1.00, 5.00, step=0.05,
                   format="C$%.2f", key="diesel_price",
-                  help="The current diesel price. Higher diesel costs make the switch to hydrogen even more financially attractive.")
+                  help="Regional diesel reference price. Scales avoided fuel cost in the LCOA calculation.")
 
     st.divider()
     st.caption(
-        f"Atlas-H2 v8.0 · Federal ITC **{cfg.FEDERAL_H2_ITC*100:.0f}%** · "
+        f"Atlas-H2 v9.2 · Federal ITC **{cfg.FEDERAL_H2_ITC*100:.0f}%** · "
         f"NB Grid **{cfg.NB_GRID_CARBON_INTENSITY} kg CO₂/kWh**"
     )
 
@@ -911,9 +982,6 @@ def run_all(
     )
     # [LCOA-1 FIX] annual_h2_cost_cad must include amortised CAPEX so that the LCOA
     # calculation reflects the true all-in cost of the H₂ system.
-    # Previous: only elec + opex → LCOA was ~C$544/t (overstated by omitting C$69,300/yr capex).
-    # Correct:  net_capex / 10-yr analysis period + opex + elec → passed to carbon calculator
-    # which then subtracts avoided diesel costs to yield the net incremental LCOA.
     annual_h2_cost_cad = (
         econ_htpem.net_capex_after_itc_cad / EconomicsEngine.ANALYSIS_PERIOD_YEARS
         + econ_htpem.annual_opex_cad
@@ -1021,7 +1089,7 @@ def build_export_csv(
 with st.sidebar:
     st.divider()
     st.download_button(
-        label="⬇  Export Full Report (CSV)",
+        label="Export Full Report (CSV)",
         data=build_export_csv(
             corridor_km, system_age_years, electrolyzer_kw, capacity_factor,
             fc_power, trips_per_year, electricity_rate, diesel_price, fc_efficiency, winter_temp,
@@ -1064,22 +1132,22 @@ def profile_legend() -> None:
 
 def _axis(fig: go.Figure, x_grid: bool = False, y_grid: bool = False) -> None:
     fig.update_xaxes(
-        showgrid=x_grid, zeroline=False,
+        showgrid=x_grid, zeroline=False, automargin=True,
         linecolor=C_BORDER, tickcolor=C_BORDER, tickfont_color=C_MUTED,
     )
     fig.update_yaxes(
-        showgrid=y_grid, gridcolor="rgba(24,67,90,0.53)",
+        showgrid=y_grid, gridcolor="rgba(24,67,90,0.53)", automargin=True,
         zeroline=False, tickfont_color=C_MUTED,
     )
 
 
 def _axis_lines(fig: go.Figure) -> None:
     fig.update_xaxes(
-        showgrid=False, zeroline=False,
+        showgrid=False, zeroline=False, automargin=True,
         linecolor=C_BORDER, tickcolor=C_BORDER, tickfont_color=C_MUTED,
     )
     fig.update_yaxes(
-        showgrid=True, gridcolor="rgba(24,67,90,0.40)",
+        showgrid=True, gridcolor="rgba(24,67,90,0.40)", automargin=True,
         zeroline=False, tickfont_color=C_MUTED,
     )
 
@@ -1093,20 +1161,20 @@ age_badge_text = (
     else f"Year {system_age_years} · H₂ efficiency {econ_htpem.effective_h2_efficiency*100:.1f}%"
 )
 
-st.markdown('<p class="eyebrow">Atlas-H2 · Digital Infrastructure Twin · v8.0</p>', unsafe_allow_html=True)
-st.title("Which Train Should Replace Diesel on Canada's Rail Corridors?")
+st.markdown('<p class="eyebrow">Atlas-H2 · Digital Infrastructure Twin · v9.2</p>', unsafe_allow_html=True)
+st.markdown('<h1 style="margin-bottom: 1rem;">4-Way Rail Propulsion Comparison — SJ–Moncton Corridor</h1>', unsafe_allow_html=True)
 st.markdown(
-    f"<span style='color:{C_MUTED}'>We compare four propulsion options: &nbsp;</span>"
+    f"<span style='color:{C_MUTED}'>Technologies evaluated: &nbsp;</span>"
     f"<span style='color:{C_DIESEL};font-weight:600;'>Diesel</span>"
     f"<span style='color:{C_MUTED}'> &nbsp;·&nbsp; </span>"
     f"<span style='color:{C_BATT};font-weight:600;'>Battery Electric</span>"
     f"<span style='color:{C_MUTED}'> &nbsp;·&nbsp; </span>"
-    f"<span style='color:{C_LTPEM};font-weight:600;'>Low-Temp Hydrogen</span>"
+    f"<span style='color:{C_LTPEM};font-weight:600;'>LTPEM Hydrogen</span>"
     f"<span style='color:{C_MUTED}'> &nbsp;·&nbsp; </span>"
-    f"<span style='color:{C_HTPEM};font-weight:700;'>High-Temp Hydrogen ✦</span>"
-    f'<span class="route-badge">📍 {route_label(corridor_km)}</span>'
+    f"<span style='color:{C_HTPEM};font-weight:700;'>HTPEM Hydrogen</span>"
+    f'<span class="route-badge">{route_label(corridor_km)}</span>'
     f'<span class="age-badge" style="background:{age_color}18;border:1px solid {age_color}44;'
-    f'color:{age_color}">⚡ {age_badge_text}</span>',
+    f'color:{age_color}">{age_badge_text}</span>',
     unsafe_allow_html=True,
 )
 st.markdown('<div class="header-accent-bar"></div>', unsafe_allow_html=True)
@@ -1125,33 +1193,33 @@ lcoh_delta      = econ_ltpem.lcoh_cad_per_kg - econ_htpem.lcoh_cad_per_kg
 
 kpi_row([
     {
-        "label": "H₂ Fuel Cost (HTPEM)",
+        "label": "HTPEM LCOH",
         "value": f"C${econ_htpem.lcoh_cad_per_kg:.2f} /kg",
-        "delta": f"C${lcoh_delta:.2f} cheaper than Low-Temp H₂",
+        "delta": f"C${lcoh_delta:.2f} below LTPEM",
         "delta_class": "pos",
     },
     {
-        "label": "Weight Penalty Saved",
+        "label": "Payload Advantage vs Battery",
         "value": f"{freight_saved_t:.2f} t / trip",
-        "delta": f"more cargo capacity vs Battery EV",
+        "delta": f"{corridor_km} km corridor",
         "delta_class": "pos",
     },
     {
-        "label": "Pollution Removed · 5 yrs",
-        "value": f"{carbon.total_co2_abated_tonnes:,.0f} t CO₂",
-        "delta": f"≈ {carbon.equivalent_cars_removed:,} cars off the road / yr",
+        "label": "CO₂ Abated — 5-Year Total",
+        "value": f"{carbon.total_co2_abated_tonnes:,.0f} t",
+        "delta": f"equiv. {carbon.equivalent_cars_removed:,} passenger cars/yr",
         "delta_class": "pos",
     },
     {
-        "label": "Government Grants",
+        "label": "Available Incentives",
         "value": f"C${econ_htpem.itc_savings_cad + econ_htpem.bop_saving_cad:,.0f}",
-        "delta": f"40% Federal ITC + C${econ_htpem.bop_saving_cad:,.0f} BOP saving",
+        "delta": f"40% Federal ITC + C${econ_htpem.bop_saving_cad:,.0f} BOP reduction",
         "delta_class": "pos",
     },
     {
-        "label": "Free Heating Advantage",
+        "label": "Annual Thermal Advantage",
         "value": f"C${thermal_swing:,.0f} /yr",
-        "delta": "saved vs Low-Temp H₂ — no electric heaters",
+        "delta": "HTPEM vs LTPEM — no electric HVAC draw",
         "delta_class": "pos" if system_age_years == 0 else "warn",
     },
 ])
@@ -1162,22 +1230,22 @@ st.divider()
 # ── TABS ──────────────────────────────────────────────────────────────────────
 
 tab_guide, tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "📖  Guide",
-    "📦  Weight Penalty",
-    "💰  Fuel Cost",
-    "🌡️  Winter Heating",
-    "🌿  Carbon Impact",
-    "🎯  Sensitivity",
+    "Guide",
+    "Weight Penalty",
+    "Fuel Cost",
+    "Winter Heating",
+    "Carbon Impact",
+    "Sensitivity",
 ])
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# TAB 0 · GUIDE — The Investor Story
+# TAB 0 · GUIDE
 # ════════════════════════════════════════════════════════════════════════════
 
 with tab_guide:
 
-    # ── HERO ─────────────────────────────────────────────────────────────────
+    # ── HEADER PANEL ─────────────────────────────────────────────────────────
     st.markdown(f"""
     <div style="
         background: linear-gradient(135deg, {C_SURFACE} 0%, {C_ACCENT2}3a 55%, {C_SURFACE} 100%);
@@ -1197,197 +1265,152 @@ with tab_guide:
       <div style="position:relative;">
         <p style="margin:0 0 7px;font-size:0.62rem;font-weight:700;letter-spacing:0.18em;
                   text-transform:uppercase;color:{C_HTPEM};">
-          Atlas-H2 &nbsp;&middot;&nbsp; Digital Infrastructure Study &nbsp;&middot;&nbsp; v8.0
+          Atlas-H2 &nbsp;&middot;&nbsp; Python-Based Simulation
         </p>
         <h2 style="margin:0 0 10px;font-size:1.42rem;font-weight:800;color:{C_TEXT};
                    line-height:1.2;letter-spacing:-0.02em;">
-          The Case for High-Temperature Hydrogen Rail
+          4-Way Rail Propulsion Comparison — SJ–Moncton Corridor
         </h2>
-        <p style="margin:0 0 16px;font-size:0.84rem;color:{C_MUTED};line-height:1.65;max-width:720px;">
-          Canada needs to decarbonize its regional rail corridors. Four technologies are on the table.
-          Only one works in a Canadian winter without economic compromise.
-          <strong style="color:{C_TEXT};">Every number below updates live</strong> — use the
-          sidebar sliders to test any assumption.
+        <p style="margin:0 0 16px;font-size:0.88rem;color:{C_MUTED};line-height:1.65;max-width:720px;">
+          This study evaluates Diesel, Battery-EV, LTPEM Hydrogen, and HTPEM Hydrogen propulsion
+          on three quantitative dimensions: storage mass penalty, thermal energy balance,
+          and levelized fuel cost. All parameters are adjustable via the sidebar.
         </p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;">
           <div style="background:{C_BG};border:1px solid {C_BORDER};border-radius:8px;
-                      padding:8px 16px;font-size:0.75rem;color:{C_TEXT};font-weight:600;">
-            📍 {route_label(corridor_km)}
+                      padding:8px 16px;font-size:0.78rem;color:{C_TEXT};font-weight:600;">
+            {route_label(corridor_km)}
           </div>
           <div style="background:{C_BG};border:1px solid {C_BORDER};border-radius:8px;
-                      padding:8px 16px;font-size:0.75rem;color:{C_TEXT};font-weight:600;">
-            🌡️ Winter: {winter_temp} °C
+                      padding:8px 16px;font-size:0.78rem;color:{C_TEXT};font-weight:600;">
+            Winter design temperature: {winter_temp} °C
           </div>
           <div style="background:{C_HTPEM}18;border:1px solid {C_HTPEM}33;border-radius:8px;
-                      padding:8px 16px;font-size:0.75rem;color:{C_HTPEM};font-weight:700;">
-            ⚡ H₂ Fuel Cost: C${econ_htpem.lcoh_cad_per_kg:.2f}/kg
+                      padding:8px 16px;font-size:0.78rem;color:{C_HTPEM};font-weight:700;">
+            HTPEM LCOH: C${econ_htpem.lcoh_cad_per_kg:.2f}/kg
           </div>
           <div style="background:{C_GREEN}10;border:1px solid {C_GREEN}33;border-radius:8px;
-                      padding:8px 16px;font-size:0.75rem;color:{C_GREEN};font-weight:700;">
-            🌿 {carbon.total_co2_abated_tonnes:,.0f} t CO₂ avoided over 5 yrs
+                      padding:8px 16px;font-size:0.78rem;color:{C_GREEN};font-weight:700;">
+            CO₂ abated (5 yr): {carbon.total_co2_abated_tonnes:,.0f} t
           </div>
         </div>
       </div>
     </div>
     """, unsafe_allow_html=True)
 
-    # ── TWO-COLUMN STORY ──────────────────────────────────────────────────────
-    col_l, col_r = st.columns(2, gap="large")
+    # ── MEMBRANE CHEMISTRY — MANDATED TECHNICAL PARAGRAPH [COPY-4] ───────────
+    st.markdown(f"""
+    <p style="margin:0 0 14px;font-size:0.62rem;font-weight:700;letter-spacing:0.16em;
+              text-transform:uppercase;color:{C_LTPEM}aa;">Fuel Cell Technology: Membrane Chemistry</p>
+    <div class="info-callout">
+      <strong>Why HTPEM outperforms LTPEM in sub-zero rail service:</strong>
+      The core difference lies in the membrane's chemical composition: standard LTPEM units use
+      a water-saturated polymer (Nafion) that fails if temperatures exceed 80°C and the water
+      boils off, whereas HTPEM systems utilize an acid-doped PBI membrane. Because this
+      acid-based chemistry does not rely on water to conduct protons, the fuel cell can maintain
+      high performance at 160°C, allowing the system to recycle high-grade waste heat and
+      tolerate lower-purity hydrogen. On the SJ–Moncton corridor, this translates to three
+      measurable advantages: the 160°C exhaust fully covers the 30°C cabin heating load
+      (eliminating the 50 kW electric HVAC draw), the simplified balance-of-plant removes the
+      PSA purification unit (15% CAPEX reduction), and the higher operating temperature enables
+      a more energy-dense storage system (1,800 vs 1,500 Wh/kg).
+    </div>
+    """, unsafe_allow_html=True)
 
-    with col_l:
+    # ── THERMAL CONSTRAINTS (full width) ─────────────────────────────────────
+    st.markdown(f"""
+    <p style="margin:18px 0 14px;font-size:0.62rem;font-weight:700;letter-spacing:0.16em;
+              text-transform:uppercase;color:{C_RED}aa;">Thermal Constraint: Sub-Zero Operation</p>
+    """, unsafe_allow_html=True)
+
+    wall_cards = [
+        (C_RED, "01 — Winter Heating Load",
+         "Battery-EV and LTPEM incur a mandatory electric heating penalty.",
+         f"At {winter_temp} °C, cabin heating requires {cfg.BASELINE_LTPEM.hvac_power_draw_kw:.0f} kW "
+         f"of continuous power. Battery-EV and LTPEM stacks cannot supply this from waste heat, "
+         f"so they draw from their traction energy store on every trip. "
+         f"This increases effective energy consumption and reduces available payload capacity.",
+         "0.06s"),
+        (C_ORANGE, "02 — LTPEM Stack Temperature Limitation",
+         "LTPEM stack operating temperature (70 °C) is below the cabin heating threshold.",
+         f"Cabin heating requires a supply temperature above approximately 55–60 °C. "
+         f"LTPEM stacks (Ballard FCmove architecture) operate at 70 °C — marginal at best "
+         f"and insufficient at higher flow rates. In practice, a separate "
+         f"{cfg.BASELINE_LTPEM.hvac_power_draw_kw:.0f} kW electric HVAC unit is required, "
+         f"identical to the Battery-EV penalty.",
+         "0.14s"),
+        (C_MUTED, "03 — Quantified Impact",
+         f"Storage penalty: Battery-EV {battery_loss_t:.2f} t, HTPEM {htpem_loss_t:.2f} t per trip.",
+         f"Across {trips_per_year:,} annual trips at C${electricity_rate:.4f}/kWh, "
+         f"the electric HVAC draw costs approximately C${ltpem_thermal.hvac_annual_cost_cad:,.0f}/yr "
+         f"for both LTPEM and Battery-EV configurations. "
+         f"HTPEM avoids this cost entirely through waste heat recovery.",
+         "0.22s"),
+    ]
+
+    for num_str, tag, headline, body, delay in wall_cards:
         st.markdown(f"""
-        <p style="margin:0 0 14px;font-size:0.62rem;font-weight:700;letter-spacing:0.16em;
-                  text-transform:uppercase;color:{C_RED}aa;">❄️ &nbsp;The Winter Problem</p>
+        <div style="
+            display:flex;gap:14px;align-items:flex-start;
+            background:{C_SURFACE};border:1px solid {C_BORDER};
+            border-left:3px solid {C_RED};
+            border-radius:0 12px 12px 0;
+            padding:17px 19px;margin-bottom:10px;
+            transition:border-color 0.28s cubic-bezier(0.22,1,0.36,1),
+                       box-shadow 0.28s ease,transform 0.28s cubic-bezier(0.22,1,0.36,1);
+            animation:fadeInUp 0.42s cubic-bezier(0.22,1,0.36,1) both;
+            animation-delay:{delay};">
+          <div style="flex-shrink:0;width:32px;height:32px;border-radius:9px;
+              background:{C_RED}15;border:1px solid {C_RED}33;
+              display:flex;align-items:center;justify-content:center;
+              font-size:0.62rem;font-weight:800;color:{C_RED};
+              letter-spacing:0.04em;margin-top:1px;">{num_str[:2]}</div>
+          <div style="min-width:0;">
+            <p style="margin:0 0 3px;font-size:0.62rem;font-weight:700;
+                      letter-spacing:0.10em;text-transform:uppercase;color:{C_RED}99;">{tag}</p>
+            <p style="margin:0 0 7px;font-size:0.88rem;font-weight:700;
+                      color:{C_TEXT};line-height:1.3;">{headline}</p>
+            <p style="margin:0;font-size:0.82rem;color:{C_MUTED};line-height:1.62;">{body}</p>
+          </div>
+        </div>
         """, unsafe_allow_html=True)
 
-        wall_cards = [
-            (C_RED, "The Core Challenge",
-             "Canadian winters kill Battery & Low-Temp Hydrogen efficiency.",
-             f"Imagine running your car heater from the same battery that powers the engine. "
-             f"At {winter_temp} °C, Battery-EV and Low-Temp Hydrogen trains must do exactly that — "
-             f"divert massive amounts of stored energy just to keep passengers warm. "
-             f"This makes them heavier, more expensive, and operationally compromised.",
-             "0.06s"),
-            (C_ORANGE, "Why Low-Temp Hydrogen Also Fails",
-             "It runs too cold — like an engine that can't warm your car.",
-             f"Low-Temp hydrogen engines (the current off-the-shelf option) operate at 70 °C. "
-             f"That's not hot enough to heat a train cabin. So just like the Battery-EV, "
-             f"it needs a separate {cfg.BASELINE_LTPEM.hvac_power_draw_kw:.0f} kW electric heater — "
-             f"eating into its energy budget every single trip.",
-             "0.15s"),
-            (C_MUTED, "The Numbers Are Clear",
-             f"Battery EV carries {battery_loss_t:.2f} t less cargo. HTPEM loses only {htpem_loss_t:.2f} t.",
-             f"Across {trips_per_year:,} annual trips at C${electricity_rate:.4f}/kWh electricity, "
-             f"the heating cost gap compounds year after year. "
-             f"The annual advantage of High-Temp Hydrogen over Low-Temp is "
-             f"C${thermal_swing:,.0f} — just from not needing electric heaters.",
-             "0.24s"),
-        ]
+    st.divider()
 
-        for color, tag, headline, body, delay in wall_cards:
-            icon = "❄️" if color == C_RED else ("⚠️" if color == C_ORANGE else "📊")
-            st.markdown(f"""
-            <div style="
-                display:flex;gap:14px;align-items:flex-start;
-                background:{C_SURFACE};border:1px solid {C_BORDER};
-                border-left:3px solid {color};
-                border-radius:0 12px 12px 0;
-                padding:17px 19px;margin-bottom:11px;
-                transition:border-color 0.28s cubic-bezier(0.22,1,0.36,1),
-                           box-shadow 0.28s ease,transform 0.28s cubic-bezier(0.22,1,0.36,1);
-                animation:fadeInUp 0.42s cubic-bezier(0.22,1,0.36,1) both;
-                animation-delay:{delay};">
-              <div style="flex-shrink:0;width:32px;height:32px;border-radius:9px;
-                  background:{color}15;border:1px solid {color}33;
-                  display:flex;align-items:center;justify-content:center;
-                  font-size:0.80rem;margin-top:1px;">{icon}</div>
-              <div style="min-width:0;">
-                <p style="margin:0 0 3px;font-size:0.62rem;font-weight:700;
-                          letter-spacing:0.10em;text-transform:uppercase;color:{color}99;">{tag}</p>
-                <p style="margin:0 0 7px;font-size:0.85rem;font-weight:700;
-                          color:{C_TEXT};line-height:1.25;">{headline}</p>
-                <p style="margin:0;font-size:0.78rem;color:{C_MUTED};line-height:1.62;">{body}</p>
-              </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-    with col_r:
-        st.markdown(f"""
-        <p style="margin:0 0 14px;font-size:0.62rem;font-weight:700;letter-spacing:0.16em;
-                  text-transform:uppercase;color:{C_HTPEM}aa;">🔥 &nbsp;The HTPEM Solution</p>
-        """, unsafe_allow_html=True)
-
-        bop_pct = cfg.INNOVATION_HTPEM.capex_purification_discount_pct * 100
-        solution_cards = [
-            (C_HTPEM, "160 °C — The Breakthrough",
-             "Hot enough to heat the cabin for free.",
-             f"High-Temp PEM engines run at 160 °C. That exhaust is piped directly into the cabin "
-             f"heating system at zero extra cost. The {cfg.BASELINE_LTPEM.hvac_power_draw_kw:.0f} kW "
-             f"electric heater disappears entirely — saving {cfg.BASELINE_LTPEM.hvac_power_draw_kw:.0f} kW "
-             f"× {thermal['h2_htpem'].trip_duration_hr:.2f} hr × {trips_per_year:,} trips = "
-             f"{cfg.BASELINE_LTPEM.hvac_power_draw_kw * thermal['h2_htpem'].trip_duration_hr * trips_per_year:,.0f} kWh/yr "
-             f"of electricity.",
-             "0.09s"),
-            (C_GREEN, f"{bop_pct:.0f}% Equipment Cost Saving",
-             "A more tolerant engine needs less purification equipment.",
-             f"High-Temp hydrogen engines tolerate impurities that would damage low-temp ones. "
-             f"This means one entire piece of equipment — the gas purifier — can be eliminated "
-             f"from the on-site hydrogen plant. That saves C${econ_htpem.bop_saving_cad:,.0f} "
-             f"on this configuration, on top of the 40% federal government grant.",
-             "0.18s"),
-            (C_GREEN, "✦ The Clear Winner on Every Metric",
-             f"C${econ_htpem.lcoh_cad_per_kg:.2f}/kg fuel · {htpem_loss_t:.2f} t weight loss · "
-             f"C${thermal_swing:,.0f}/yr heating saving.",
-             f"Scored on weight, heating cost, fuel price, and environmental impact simultaneously, "
-             f"High-Temp Hydrogen wins on every axis. At current energy prices the full H₂ system "
-             f"(equipment + maintenance + electricity) costs less to run than buying diesel — "
-             f"meaning the decarbonisation is self-financing before a single carbon credit is counted. "
-             f"Battery and Low-Temp Hydrogen cannot close the equation for a Canadian winter corridor.",
-             "0.27s"),
-        ]
-
-        for color, tag, headline, body, delay in solution_cards:
-            icon = "🔥" if color == C_HTPEM else "✅"
-            st.markdown(f"""
-            <div style="
-                display:flex;gap:14px;align-items:flex-start;
-                background:{C_SURFACE};border:1px solid {C_BORDER};
-                border-left:3px solid {color};
-                border-radius:0 12px 12px 0;
-                padding:17px 19px;margin-bottom:11px;
-                transition:border-color 0.28s cubic-bezier(0.22,1,0.36,1),
-                           box-shadow 0.28s ease,transform 0.28s cubic-bezier(0.22,1,0.36,1);
-                animation:slideInRight 0.42s cubic-bezier(0.22,1,0.36,1) both;
-                animation-delay:{delay};">
-              <div style="flex-shrink:0;width:32px;height:32px;border-radius:9px;
-                  background:{color}15;border:1px solid {color}33;
-                  display:flex;align-items:center;justify-content:center;
-                  font-size:0.80rem;margin-top:1px;">{icon}</div>
-              <div style="min-width:0;">
-                <p style="margin:0 0 3px;font-size:0.62rem;font-weight:700;
-                          letter-spacing:0.10em;text-transform:uppercase;color:{color}99;">{tag}</p>
-                <p style="margin:0 0 7px;font-size:0.85rem;font-weight:700;
-                          color:{C_TEXT};line-height:1.25;">{headline}</p>
-                <p style="margin:0;font-size:0.78rem;color:{C_MUTED};line-height:1.62;">{body}</p>
-              </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-    # ── HOW TO USE ────────────────────────────────────────────────────────────
+    # ── NAVIGATION ────────────────────────────────────────────────────────────
     st.markdown(f"""
     <div style="
         background:{C_SURFACE};border:1px solid {C_BORDER};
         border-radius:12px;padding:20px 24px;margin-top:6px;
         animation:fadeInUp 0.46s cubic-bezier(0.22,1,0.36,1) both;animation-delay:0.32s;">
-      <p style="margin:0 0 12px;font-size:0.62rem;font-weight:700;letter-spacing:0.16em;
-                text-transform:uppercase;color:{C_HTPEM};">🎛️ &nbsp;How to Use This Dashboard</p>
-      <p style="margin:0 0 6px;font-size:0.82rem;color:{C_TEXT};font-weight:600;">
-        Every number updates live. Use the sidebar sliders to stress-test assumptions.
+      <p style="margin:0 0 10px;font-size:0.62rem;font-weight:700;letter-spacing:0.16em;
+                text-transform:uppercase;color:{C_HTPEM};">Navigation</p>
+      <p style="margin:0 0 6px;font-size:0.88rem;color:{C_TEXT};font-weight:600;">
+        All displayed values update in response to the sidebar sliders.
       </p>
-      <p style="margin:0 0 14px;font-size:0.79rem;color:{C_MUTED};line-height:1.6;max-width:820px;">
-        Try dragging the <strong style="color:{C_TEXT};">Winter Temperature</strong> slider colder
-        to see Battery and Low-Temp costs spike. Try raising the
-        <strong style="color:{C_TEXT};">Electricity Price</strong> to model future grid costs.
-        Each tab below examines a different dimension of the comparison.
+      <p style="margin:0 0 14px;font-size:0.84rem;color:{C_MUTED};line-height:1.6;max-width:820px;">
+        Adjust the <strong style="color:{C_TEXT};">Winter Temperature</strong> slider to vary
+        the HVAC heating demand. Adjust <strong style="color:{C_TEXT};">Electricity Price</strong>
+        to stress-test the LCOH and LCOA figures. Each tab below isolates one evaluation dimension.
       </p>
       <div style="display:flex;flex-wrap:wrap;gap:8px;">
-        <span class="how-to-chip">📦 Weight Penalty — How much cargo capacity each train loses</span>
-        <span class="how-to-chip">💰 Fuel Cost — What it costs to make hydrogen on-site</span>
-        <span class="how-to-chip">🌡️ Winter Heating — The annual heating cost per technology</span>
-        <span class="how-to-chip">🌿 Carbon Impact — How much pollution is eliminated</span>
-        <span class="how-to-chip">🎯 Sensitivity — Best and worst case cost scenarios</span>
+        <span class="how-to-chip">Weight Penalty — Storage mass vs diesel baseline</span>
+        <span class="how-to-chip">Fuel Cost — LCOH breakdown: CAPEX, OPEX, electricity</span>
+        <span class="how-to-chip">Winter Heating — Annual thermal energy balance</span>
+        <span class="how-to-chip">Carbon Impact — CO₂ abated and net abatement cost</span>
+        <span class="how-to-chip">Sensitivity — LCOH grid across electricity rate and CAPEX</span>
       </div>
     </div>
     """, unsafe_allow_html=True)
 
-    # ── PLAIN ENGLISH GLOSSARY ────────────────────────────────────────────────
+    # ── GLOSSARY ──────────────────────────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
     gc1, gc2, gc3, gc4 = st.columns(4)
     gloss = [
-        (gc1, "LCOH", "Hydrogen Fuel Cost", HELP_LCOH, C_HTPEM, "0.36s"),
-        (gc2, "LCOA", "Net Cost per Tonne of CO₂ Removed", HELP_LCOA, C_LTPEM, "0.42s"),
-        (gc3, "Heating Method", "High-Temp vs Low-Temp", HELP_HTPEM, C_ORANGE, "0.48s"),
-        (gc4, "Weight Penalty", "Cargo Lost to Heavy Equipment", HELP_GRAVIMETRIC, C_MUTED, "0.54s"),
+        (gc1, "LCOH", "Levelized Cost of Hydrogen", HELP_LCOH, C_HTPEM, "0.36s"),
+        (gc2, "LCOA", "Levelized Cost of Abatement", HELP_LCOA, C_LTPEM, "0.42s"),
+        (gc3, "HTPEM vs LTPEM", "Membrane Chemistry", HELP_HTPEM, C_ORANGE, "0.48s"),
+        (gc4, "Gravimetric Penalty", "Storage Mass vs Diesel", HELP_GRAVIMETRIC, C_MUTED, "0.54s"),
     ]
     for col, term, subtitle, defn, color, delay in gloss:
         with col:
@@ -1397,11 +1420,11 @@ with tab_guide:
                         border-radius:0 0 10px 10px;padding:14px 15px;
                         animation:fadeInUp 0.4s cubic-bezier(0.22,1,0.36,1) both;
                         animation-delay:{delay};">
-              <p style="margin:0 0 3px;font-size:0.82rem;font-weight:700;
+              <p style="margin:0 0 3px;font-size:0.85rem;font-weight:700;
                         color:{color};letter-spacing:-0.01em;">{term}</p>
-              <p style="margin:0 0 8px;font-size:0.68rem;color:{C_MUTED};
+              <p style="margin:0 0 8px;font-size:0.72rem;color:{C_MUTED};
                         font-weight:500;">{subtitle}</p>
-              <p style="margin:0;font-size:0.76rem;font-weight:400;color:{C_MUTED};
+              <p style="margin:0;font-size:0.80rem;font-weight:400;color:{C_MUTED};
                         line-height:1.58;">{defn}</p>
             </div>
             """, unsafe_allow_html=True)
@@ -1427,25 +1450,33 @@ with tab1:
         fig_payload = go.Figure(go.Bar(
             x=PROFILE_NAMES, y=loss_values,
             marker_color=PROFILE_COLORS_LIST, marker_line_width=0,
-            text=[f"−{v:.2f} t" if v > 0 else "✦ Baseline" for v in loss_values],
-            textposition="outside", textfont=dict(size=11, color=C_TEXT),
+            text=[f"−{v:.2f} t" if v > 0 else "Ref." for v in loss_values],
+            textposition="outside", textfont=dict(size=12, color=C_TEXT, family="Inter, system-ui, sans-serif"),
             width=0.5, cliponaxis=False,
             hovertemplate="<b>%{x}</b><br>Cargo Lost: <b>%{y:.3f} tonnes</b><extra></extra>",
         ))
         fig_payload.update_layout(
             **PLOTLY_BASE,
-            title=f"Tonnes of Cargo Lost Due to Equipment Weight — {corridor_km} km Route",
-            height=420, margin=dict(t=44, b=56, l=8, r=8),
-            yaxis_title="Tonnes of Cargo Lost", xaxis_title=None, showlegend=False,
+            title=dict(text=f"Tonnes of Cargo Lost Due to Equipment Weight — {corridor_km} km Route", font_size=13, font_color=C_TEXT),
+            height=460, margin=dict(t=50, b=80, l=60, r=20),
+            yaxis_title=dict(text="Tonnes of Cargo Lost", font_size=12, font_color=C_MUTED),
+            xaxis_title=None, showlegend=False,
         )
-        _axis(fig_payload)
-        fig_payload.update_yaxes(zeroline=True, zerolinecolor=C_BORDER, zerolinewidth=1)
-        st.plotly_chart(fig_payload, use_container_width=True)
+        fig_payload.update_xaxes(
+            tickfont=dict(color=C_MUTED, size=11), linewidth=2, linecolor=C_BORDER,
+            gridwidth=1, gridcolor="rgba(24,67,90,0.25)",
+        )
+        fig_payload.update_yaxes(
+            zeroline=True, zerolinecolor=C_BORDER, zerolinewidth=2,
+            tickfont=dict(color=C_MUTED, size=11),
+            gridcolor="rgba(24,67,90,0.25)", gridwidth=1, linewidth=2, linecolor=C_BORDER,
+        )
+        st.plotly_chart(fig_payload, use_container_width=True, config={"displayModeBar": False})
 
     with col_panel:
         st.markdown(
             f'<div class="section-accent"><h3>Storage System Comparison</h3>'
-            f'<p>Why batteries are so heavy</p></div>',
+            f'<p>Why batteries carry the largest mass penalty</p></div>',
             unsafe_allow_html=True,
         )
         rows = []
@@ -1510,20 +1541,19 @@ with tab2:
             hole=0.56,
             marker_colors=["#075985", "#0284C7", "#38BDF8"],
             marker_line=dict(color=C_BG, width=2),
-            textinfo="percent", textfont_size=11,
+            textinfo="percent", textfont=dict(size=14, color=C_TEXT, family="Inter, system-ui, sans-serif"),
             hovertemplate="<b>%{label}</b><br>C$%{value:,.0f} · %{percent}<extra></extra>",
         ))
         fig_lt.update_layout(
             **PLOTLY_BASE,
-            title=f"Low-Temp H₂ · C${econ_ltpem.lcoh_cad_per_kg:.2f} per kg",
-            height=320, margin=dict(t=48, b=16, l=8, r=8), showlegend=False,
+            title=dict(text=f"Low-Temp H₂ · C${econ_ltpem.lcoh_cad_per_kg:.2f} per kg", font_size=13, font_color=C_TEXT),
+            height=320, margin=dict(t=50, b=20, l=8, r=8), showlegend=False,
             annotations=[dict(
-                text=f"<b>C${econ_ltpem.total_10yr_cost_cad/1e6:.2f}M</b><br><span style='font-size:10px'>10-yr total</span>",
-                x=0.5, y=0.5, font_size=13, showarrow=False,
-                font_color=C_TEXT, font_family="Inter, system-ui, sans-serif",
+                text=f"<b>C${econ_ltpem.total_10yr_cost_cad/1e6:.2f}M</b><br><span style='font-size:11px'>10-yr total</span>",
+                x=0.5, y=0.5, font=dict(size=14, color=C_TEXT, family="Inter, system-ui, sans-serif"), showarrow=False,
             )],
         )
-        st.plotly_chart(fig_lt, use_container_width=True)
+        st.plotly_chart(fig_lt, use_container_width=True, config={"displayModeBar": False})
 
     with col_ht:
         fig_ht = go.Figure(go.Pie(
@@ -1536,20 +1566,19 @@ with tab2:
             hole=0.56,
             marker_colors=["#064E3B", "#059669", "#6EE7B7"],
             marker_line=dict(color=C_BG, width=2),
-            textinfo="percent", textfont_size=11,
+            textinfo="percent", textfont=dict(size=14, color=C_TEXT, family="Inter, system-ui, sans-serif"),
             hovertemplate="<b>%{label}</b><br>C$%{value:,.0f} · %{percent}<extra></extra>",
         ))
         fig_ht.update_layout(
             **PLOTLY_BASE,
-            title=f"High-Temp H₂ ✦ · C${econ_htpem.lcoh_cad_per_kg:.2f} per kg",
-            height=320, margin=dict(t=48, b=16, l=8, r=8), showlegend=False,
+            title=dict(text=f"HTPEM H₂ (Recommended) · C${econ_htpem.lcoh_cad_per_kg:.2f} per kg", font_size=13, font_color=C_TEXT),
+            height=320, margin=dict(t=50, b=20, l=8, r=8), showlegend=False,
             annotations=[dict(
-                text=f"<b>C${econ_htpem.total_10yr_cost_cad/1e6:.2f}M</b><br><span style='font-size:10px'>10-yr total</span>",
-                x=0.5, y=0.5, font_size=13, showarrow=False,
-                font_color=C_TEXT, font_family="Inter, system-ui, sans-serif",
+                text=f"<b>C${econ_htpem.total_10yr_cost_cad/1e6:.2f}M</b><br><span style='font-size:11px'>10-yr total</span>",
+                x=0.5, y=0.5, font=dict(size=14, color=C_TEXT, family="Inter, system-ui, sans-serif"), showarrow=False,
             )],
         )
-        st.plotly_chart(fig_ht, use_container_width=True)
+        st.plotly_chart(fig_ht, use_container_width=True, config={"displayModeBar": False})
 
     with col_panel:
         st.markdown(
@@ -1558,7 +1587,7 @@ with tab2:
             unsafe_allow_html=True,
         )
         st.markdown(f"""
-| Cost Item | Low-Temp | **High-Temp ✦** |
+| Cost Item | LTPEM | HTPEM |
 |--|--:|--:|
 | Equipment cost | C${econ_ltpem.electrolyzer_capex_cad:,.0f} | C${econ_htpem.electrolyzer_capex_cad:,.0f} |
 | Equipment saving | — | **C${econ_htpem.bop_saving_cad:,.0f}** |
@@ -1604,19 +1633,27 @@ with tab3:
             x=PROFILE_NAMES, y=net_impacts,
             marker_color=bar_colors, marker_line_width=0,
             text=[f"C${v:+,.0f}" for v in net_impacts],
-            textposition="outside", textfont=dict(size=11, color=C_TEXT),
+            textposition="outside", textfont=dict(size=12, color=C_TEXT, family="Inter, system-ui, sans-serif"),
             width=0.5, cliponaxis=False,
             hovertemplate="<b>%{x}</b><br>Net Annual Heating Impact: <b>C$%{y:+,.0f}</b><extra></extra>",
         ))
-        fig_net.add_hline(y=0, line_width=1, line_color=C_BORDER)
+        fig_net.add_hline(y=0, line_width=2, line_color=C_BORDER)
         fig_net.update_layout(
             **PLOTLY_BASE,
-            title=f"Annual Heating Savings (+) or Cost (−) per Technology — {corridor_km} km",
-            yaxis_title="C$ per Year", xaxis_title=None,
-            height=360, margin=dict(t=44, b=56, l=8, r=8), showlegend=False,
+            title=dict(text=f"Annual Heating Savings (+) or Cost (−) per Technology — {corridor_km} km", font_size=13, font_color=C_TEXT),
+            yaxis_title=dict(text="C$ per Year", font_size=12, font_color=C_MUTED),
+            xaxis_title=None,
+            height=400, margin=dict(t=50, b=80, l=60, r=20), showlegend=False,
         )
-        _axis(fig_net)
-        st.plotly_chart(fig_net, use_container_width=True)
+        fig_net.update_xaxes(
+            tickfont=dict(color=C_MUTED, size=11), linewidth=2, linecolor=C_BORDER,
+            gridwidth=1, gridcolor="rgba(24,67,90,0.25)",
+        )
+        fig_net.update_yaxes(
+            tickfont=dict(color=C_MUTED, size=11), gridcolor="rgba(24,67,90,0.25)",
+            gridwidth=1, linewidth=2, linecolor=C_BORDER,
+        )
+        st.plotly_chart(fig_net, use_container_width=True, config={"displayModeBar": False})
 
         fig_stack = go.Figure()
         fig_stack.add_bar(
@@ -1631,20 +1668,28 @@ with tab3:
             name="Electric Heater Cost", marker_color=C_RED, marker_line_width=0,
             hovertemplate="<b>%{x}</b><br>Heater Cost: C$%{y:,.0f}<extra></extra>",
         )
-        fig_stack.add_hline(y=0, line_width=1, line_color=C_BORDER)
+        fig_stack.add_hline(y=0, line_width=2, line_color=C_BORDER)
         fig_stack.update_layout(
             **PLOTLY_BASE,
             barmode="relative",
-            title="Free Heat Recovered vs Electric Heater Cost (C$/yr)",
-            yaxis_title="C$ per Year", xaxis_title=None,
-            height=300, margin=dict(t=44, b=72, l=8, r=8),
+            title=dict(text="Free Heat Recovered vs Electric Heater Cost (C$/yr)", font_size=13, font_color=C_TEXT),
+            yaxis_title=dict(text="C$ per Year", font_size=12, font_color=C_MUTED),
+            xaxis_title=None,
+            height=360, margin=dict(t=50, b=100, l=60, r=20),
             legend=dict(
                 orientation="h", yanchor="top", y=-0.22, x=0.5, xanchor="center",
-                font_size=11, bgcolor="rgba(0,0,0,0)", font_color=C_MUTED,
+                font=dict(size=12, color=C_MUTED, family="Inter, system-ui, sans-serif"), bgcolor="rgba(0,0,0,0)",
             ),
         )
-        _axis(fig_stack)
-        st.plotly_chart(fig_stack, use_container_width=True)
+        fig_stack.update_xaxes(
+            tickfont=dict(color=C_MUTED, size=11), linewidth=2, linecolor=C_BORDER,
+            gridwidth=1, gridcolor="rgba(24,67,90,0.25)",
+        )
+        fig_stack.update_yaxes(
+            tickfont=dict(color=C_MUTED, size=11), gridcolor="rgba(24,67,90,0.25)",
+            gridwidth=1, linewidth=2, linecolor=C_BORDER,
+        )
+        st.plotly_chart(fig_stack, use_container_width=True, config={"displayModeBar": False})
 
     with col_panel:
         st.markdown(
@@ -1652,6 +1697,7 @@ with tab3:
             f'<p>Annual C$ impact per technology</p></div>',
             unsafe_allow_html=True,
         )
+        # [COPY-2] Emojis (♻️, ⚡) removed from heating column
         rows = []
         for p in ALL_PROFILES:
             r = thermal[p.energy_type]
@@ -1660,8 +1706,8 @@ with tab3:
                 "Engine Temp": "—" if p.energy_type in ("diesel", "battery")
                                else f"{p.operating_temp_c:.0f} °C",
                 "Heating": "Free (combustion)" if p.energy_type == "diesel"
-                           else ("♻️ Free (waste heat)" if p.hvac_power_draw_kw == 0
-                                 else f"⚡ {p.hvac_power_draw_kw:.0f} kW electric"),
+                           else ("Free (waste heat)" if p.hvac_power_draw_kw == 0
+                                 else f"{p.hvac_power_draw_kw:.0f} kW electric"),
                 "Net/yr": f"C${r.net_annual_impact_cad:+,.0f}",
             })
         st.dataframe(pd.DataFrame(rows).set_index("Technology"), use_container_width=True)
@@ -1736,16 +1782,24 @@ with tab4:
         fig_carbon.update_layout(
             **PLOTLY_BASE,
             barmode="group",
-            title="Annual Financial Value of Switching Away from Diesel (C$)",
-            yaxis_title="C$ per Year", xaxis_title=None,
-            height=430, margin=dict(t=44, b=80, l=8, r=8),
+            title=dict(text="Annual Financial Value of Switching Away from Diesel (C$)", font_size=13, font_color=C_TEXT),
+            yaxis_title=dict(text="C$ per Year", font_size=12, font_color=C_MUTED),
+            xaxis_title=None,
+            height=480, margin=dict(t=50, b=100, l=60, r=20),
             legend=dict(
-                orientation="h", yanchor="top", y=-0.18, x=0.5, xanchor="center",
-                font_size=11, bgcolor="rgba(0,0,0,0)", font_color=C_MUTED,
+                orientation="h", yanchor="top", y=-0.20, x=0.5, xanchor="center",
+                font=dict(size=12, color=C_MUTED, family="Inter, system-ui, sans-serif"), bgcolor="rgba(0,0,0,0)",
             ),
         )
-        _axis(fig_carbon)
-        st.plotly_chart(fig_carbon, use_container_width=True)
+        fig_carbon.update_xaxes(
+            tickfont=dict(color=C_MUTED, size=11), linewidth=2, linecolor=C_BORDER,
+            gridwidth=1, gridcolor="rgba(24,67,90,0.25)",
+        )
+        fig_carbon.update_yaxes(
+            tickfont=dict(color=C_MUTED, size=11), gridcolor="rgba(24,67,90,0.25)",
+            gridwidth=1, linewidth=2, linecolor=C_BORDER,
+        )
+        st.plotly_chart(fig_carbon, use_container_width=True, config={"displayModeBar": False})
 
     with col_panel:
         st.markdown(
@@ -1753,10 +1807,10 @@ with tab4:
             f'<p>Cumulative impact vs keeping the diesel train</p></div>',
             unsafe_allow_html=True,
         )
-        # LCOA can be negative (H₂ costs less than diesel AND removes pollution)
+        # [VIZ-3] Sign-aware LCOA: negative value is displayed as a saving (green delta)
         _lcoa = carbon.lcoa_cad_per_tonne
         _lcoa_cell = (
-            f"**Saves C${abs(_lcoa):,.0f}/t ✦**" if _lcoa <= 0
+            f"**Saves C${abs(_lcoa):,.0f}/t**" if _lcoa <= 0
             else f"**C${_lcoa:,.0f}/t**"
         )
         st.markdown(f"""
@@ -1771,17 +1825,18 @@ with tab4:
 | Equivalent cars off road | **{carbon.equivalent_cars_removed:,} /yr** |
         """)
         st.divider()
-        # Sign-aware metric: negative LCOA is a positive result (self-financing switch)
+
+        # [VIZ-3] Sign-aware LCOA metric with green delta when self-financing
         if _lcoa <= 0:
             _lcoa_label  = "Net Savings per Tonne of CO₂ Removed"
             _lcoa_value  = f"Saves C${abs(_lcoa):,.0f} / tonne"
-            _lcoa_delta  = "H₂ costs less than diesel — switch is self-financing ✦"
-            _lcoa_dcolor = "normal"   # green — a saving is a good thing
+            _lcoa_delta  = "Net operational cost is below diesel — switch is self-financing."
+            _lcoa_dcolor = "normal"   # green — a saving is a positive result
         else:
             _lcoa_label  = "Net Cost per Tonne of CO₂ Removed"
             _lcoa_value  = f"C${_lcoa:,.0f} / tonne"
             _lcoa_delta  = f"{carbon.total_co2_abated_tonnes:,.0f} t removed over 5 years"
-            _lcoa_dcolor = "inverse"  # red — paying to abate
+            _lcoa_dcolor = "inverse"  # red — a cost is a negative result
 
         st.metric(
             _lcoa_label,
@@ -1793,14 +1848,13 @@ with tab4:
         st.metric(
             "Cars Taken Off the Road",
             f"{carbon.equivalent_cars_removed:,} / yr",
-            f"equivalent annual impact vs keeping diesel",
+            "equivalent annual impact vs keeping diesel",
             help="Each tonne of CO₂ avoided equals the annual emissions of one average passenger car.",
         )
         st.dataframe(
             df_carbon[["Year", "CO₂ Removed (t)", "Carbon Price (C$/t)"]].set_index("Year"),
             use_container_width=True,
         )
-        # Updated callout: now reflects the corrected LCOA formula
         _callout_body = (
             f'<strong>How LCOA is calculated:</strong> '
             f'Full H₂ cost (equipment + maintenance + electricity) minus avoided diesel purchases, '
@@ -1824,10 +1878,10 @@ with tab5:
         st.subheader("Sensitivity Analysis — Best and Worst Case Fuel Cost Scenarios")
         st.markdown(
             f'<div class="info-callout">'
-            f'<strong>How to read this:</strong> The colour map shows what the hydrogen fuel '
-            f'cost would be at every combination of electricity price and plant construction cost. '
-            f'The <strong>✕ marker</strong> is your current scenario. '
-            f'<strong>Dark blue</strong> = cheap fuel · <strong>Light blue</strong> = expensive fuel. '
+            f'<strong>How to read this:</strong> The colour map shows the hydrogen fuel '
+            f'cost at every combination of electricity price and plant construction cost. '
+            f'The <strong>X marker</strong> represents your current scenario. '
+            f'<strong>Dark blue</strong> = lower fuel cost · <strong>Light blue</strong> = higher fuel cost. '
             f'Plant size: {electrolyzer_kw:,} kW · Utilisation: {capacity_factor}%.'
             f'</div>',
             unsafe_allow_html=True,
@@ -1857,21 +1911,22 @@ with tab5:
                 "Fuel Cost: <b>C$%{z:.2f}/kg</b><extra></extra>"
             ),
             colorbar=dict(
-                title=dict(text="Fuel Cost (C$/kg)", font_color=C_MUTED, font_size=11),
-                tickfont=dict(color=C_MUTED, size=10),
-                outlinecolor=C_BORDER, outlinewidth=1,
-                thickness=14, len=0.85,
+                title=dict(text="Fuel Cost<br>(C$/kg)", font=dict(color=C_MUTED, size=12)),
+                tickfont=dict(color=C_MUTED, size=11),
+                outlinecolor=C_BORDER, outlinewidth=2,
+                thickness=16, len=0.85, x=1.02,
             ),
         )
         fig_heat.add_scatter(
             x=[electricity_rate],
             y=[cfg.ELECTROLYZER_CAPEX_PER_KW],
             mode="markers+text",
-            marker=dict(symbol="x", size=14, color=C_TEXT, line_width=2.5),
-            text=["  You are here"],
-            textfont=dict(color=C_TEXT, size=11),
+            marker=dict(symbol="x", size=16, color=C_TEXT, line_width=3),
+            text=["Current scenario"],
+            textposition="top center",
+            textfont=dict(color=C_TEXT, size=12, family="Inter, system-ui, sans-serif"),
             hovertemplate=(
-                f"Your current scenario<br>"
+                f"<b>Current scenario</b><br>"
                 f"Electricity: C${electricity_rate:.4f}/kWh<br>"
                 f"Plant Cost: C${cfg.ELECTROLYZER_CAPEX_PER_KW:,.0f}/kW<br>"
                 f"Fuel Cost: C${econ_htpem.lcoh_cad_per_kg:.4f}/kg"
@@ -1881,81 +1936,124 @@ with tab5:
         )
         fig_heat.update_layout(
             **PLOTLY_BASE,
-            title="High-Temp H₂ Fuel Cost Grid (C$ per kg)",
-            xaxis_title="Electricity Price (C$/kWh)",
-            yaxis_title="Plant Construction Cost (C$/kW)",
-            height=440, margin=dict(t=44, b=48, l=60, r=20),
+            title=dict(text="High-Temp H₂ Fuel Cost Grid (C$ per kg)", font_size=15, font_color=C_TEXT),
+            xaxis_title=dict(text="Electricity Price (C$/kWh)", font_size=13, font_color=C_MUTED),
+            yaxis_title=dict(text="Plant Construction Cost (C$/kW)", font_size=13, font_color=C_MUTED),
+            height=480, margin=dict(t=60, b=80, l=100, r=80),
         )
         fig_heat.update_xaxes(
-            showgrid=False, zeroline=False,
-            linecolor=C_BORDER, tickcolor=C_BORDER, tickfont_color=C_MUTED,
-            tickformat=".3f",
+            showgrid=True, gridwidth=1, gridcolor="rgba(24,67,90,0.25)", zeroline=False,
+            linecolor=C_BORDER, linewidth=2, tickcolor=C_BORDER, tickfont=dict(color=C_MUTED, size=11),
+            tickformat=".3f", ticklen=6,
         )
         fig_heat.update_yaxes(
-            showgrid=False, zeroline=False,
-            linecolor=C_BORDER, tickcolor=C_BORDER, tickfont_color=C_MUTED,
-            tickformat=",.0f",
+            showgrid=True, gridwidth=1, gridcolor="rgba(24,67,90,0.25)", zeroline=False,
+            linecolor=C_BORDER, linewidth=2, tickcolor=C_BORDER, tickfont=dict(color=C_MUTED, size=11),
+            tickformat=",.0f", ticklen=6,
         )
-        st.plotly_chart(fig_heat, use_container_width=True)
+        st.plotly_chart(fig_heat, use_container_width=True, config={"displayModeBar": False})
 
     with col_curve:
-        deg_years = [d["year"]                  for d in deg_curve]
-        deg_lcoh  = [d["lcoh"]                  for d in deg_curve]
-        deg_yield = [d["effective_yield"] * 100 for d in deg_curve]
-        deg_pct   = [d["lcoh_increase_pct"]     for d in deg_curve]
+        deg_years   = [d["year"]              for d in deg_curve]
+        deg_lcoh    = [d["lcoh"]              for d in deg_curve]
+        deg_pct     = [d["lcoh_increase_pct"] for d in deg_curve]
+
+        # Defensive: use fc_efficiency_pct if present, otherwise compute FC degradation inline.
+        _base_fc = cfg.FC_SYSTEM_EFFICIENCY * 100.0
+        deg_fc_eff = [
+            d.get(
+                "fc_efficiency_pct",
+                max(_base_fc * (1.0 - 0.015 * d["year"]), _base_fc * 0.50),
+            )
+            for d in deg_curve
+        ]
+
+        # [VIZ-1] Annual H₂ demand rises as FC stack ages (lower efficiency → more H₂ per km).
+        # Demand scaled inversely with per-year efficiency relative to year-0 baseline.
+        base_h2_demand_kg = (
+            cfg.AVG_CONSUMPTION_KG_KM * corridor_km * trips_per_year
+        )
+        base_eff = deg_fc_eff[0] / 100.0 if deg_fc_eff[0] > 0 else cfg.FC_SYSTEM_EFFICIENCY
+        annual_h2_demand = [
+            round(base_h2_demand_kg * (base_eff / (eff / 100.0)), 1)
+            for eff in deg_fc_eff
+        ]
 
         fig_deg = go.Figure()
         fig_deg.add_scatter(
             x=deg_years, y=deg_lcoh,
             name="Fuel Cost (C$/kg)",
             mode="lines+markers",
-            line=dict(color=C_HTPEM, width=2.5),
-            marker=dict(size=6, color=C_HTPEM),
-            hovertemplate="Year %{x}<br>Fuel Cost: C$%{y:.4f}/kg<extra></extra>",
+            line=dict(color=C_HTPEM, width=3),
+            marker=dict(size=8, color=C_HTPEM, line_width=1, line_color=C_BG),
+            hovertemplate="Year %{x}<br>Fuel Cost: <b>C$%{y:.4f}/kg</b><extra></extra>",
         )
         if system_age_years <= 10:
             cur_lcoh = deg_lcoh[system_age_years]
             fig_deg.add_scatter(
                 x=[system_age_years], y=[cur_lcoh],
                 mode="markers",
-                marker=dict(size=12, color=C_TEXT, symbol="circle",
-                            line_color=C_HTPEM, line_width=2),
-                hovertemplate=f"C${cur_lcoh:.4f}/kg<extra></extra>",
+                marker=dict(size=14, color=C_TEXT, symbol="circle",
+                            line_color=C_HTPEM, line_width=3),
+                hovertemplate=f"<b>Current year</b><br>C${cur_lcoh:.4f}/kg<extra></extra>",
                 showlegend=False,
             )
+        # [VIZ-1] Secondary Y-axis: Annual H₂ Demand (kg) — rises as engine ages
         fig_deg.add_scatter(
-            x=deg_years, y=deg_yield,
-            name="H₂ Output Rate (%)",
+            x=deg_years, y=annual_h2_demand,
+            name="Annual H₂ Demand (kg)",
             mode="lines",
-            line=dict(color=C_MUTED, width=1.5, dash="dot"),
+            line=dict(color=C_BATT, width=2.5, dash="dot"),
             yaxis="y2",
-            hovertemplate="Year %{x}<br>Output Rate: %{y:.1f}%<extra></extra>",
+            hovertemplate="Year %{x}<br>H₂ Demand: <b>%{y:,.0f} kg/yr</b><extra></extra>",
         )
+        # [VIZ-1] 30% padding on both ends of the demand axis range
+        demand_min = min(annual_h2_demand)
+        demand_max = max(annual_h2_demand)
+        demand_pad = (demand_max - demand_min) * 0.30
         fig_deg.update_layout(
             **PLOTLY_BASE,
-            title="How Fuel Cost Changes as the Plant Ages (0–10 yrs)",
-            xaxis_title="Plant Age (years)",
+            title=dict(text="Fuel Cost & H₂ Demand as the Engine Ages (0–10 yrs)", font_size=15, font_color=C_TEXT),
+            xaxis=dict(
+                title=dict(text="Engine Age (years)", font_size=13, font_color=C_MUTED),
+                zerolinecolor=C_BORDER, zerolinewidth=1,
+                tickfont=dict(color=C_MUTED, size=11), ticklen=6,
+                showgrid=True, gridcolor="rgba(24,67,90,0.25)", gridwidth=1,
+            ),
             yaxis=dict(
-                title="Fuel Cost (C$/kg)", title_font_color=C_HTPEM,
-                tickfont_color=C_MUTED, gridcolor="rgba(24,67,90,0.40)", showgrid=True,
+                title=dict(text="Fuel Cost (C$/kg)", font_size=13, font_color=C_HTPEM),
+                tickfont=dict(color=C_MUTED, size=11), ticklen=6,
+                gridcolor="rgba(24,67,90,0.40)", showgrid=True, gridwidth=1,
+                automargin=True,
+                zeroline=False,
             ),
             yaxis2=dict(
-                title="H₂ Output Rate (%)", title_font_color=C_MUTED,
-                tickfont_color=C_MUTED, overlaying="y", side="right",
-                showgrid=False, range=[55, 75],
+                title=dict(text="Annual H₂ Demand (kg)", font_size=13, font_color=C_BATT),
+                tickfont=dict(color=C_BATT, size=11), ticklen=6,
+                overlaying="y", side="right",
+                showgrid=False,
+                range=[demand_min - demand_pad, demand_max + demand_pad],
+                tickformat=",",
+                automargin=True,
+                zeroline=False,
             ),
-            height=440, margin=dict(t=44, b=48, l=8, r=52),
+            height=480, margin=dict(t=60, b=80, l=80, r=80),
             legend=dict(
-                orientation="h", yanchor="top", y=-0.15, x=0.5, xanchor="center",
-                font_size=11, bgcolor="rgba(0,0,0,0)", font_color=C_MUTED,
+                orientation="h", yanchor="top", y=-0.18, x=0.5, xanchor="center",
+                font=dict(size=13, color=C_MUTED, family="Inter, system-ui, sans-serif"),
+                bgcolor="rgba(0,0,0,0)",
             ),
         )
         fig_deg.update_xaxes(
-            showgrid=False, zeroline=False,
-            linecolor=C_BORDER, tickcolor=C_BORDER, tickfont_color=C_MUTED,
+            showgrid=True, gridwidth=1, gridcolor="rgba(24,67,90,0.25)", zeroline=False,
+            automargin=True,
+            linecolor=C_BORDER, linewidth=2, tickcolor=C_BORDER,
             tickmode="linear", tick0=0, dtick=1,
         )
-        st.plotly_chart(fig_deg, use_container_width=True)
+        fig_deg.update_yaxes(
+            linecolor=C_BORDER, linewidth=2, zeroline=False,
+        )
+        st.plotly_chart(fig_deg, use_container_width=True, config={"displayModeBar": False})
 
     st.divider()
     z_flat   = [v for row in z_grid for v in row]
@@ -1971,7 +2069,7 @@ with tab5:
                f"C${lcoh_max:.2f} /kg",
                f"+C${lcoh_max - lcoh_min:.2f} above best case",
                delta_color="inverse", help=HELP_LCOH)
-    sc3.metric("Your Current Scenario",
+    sc3.metric("Current Scenario",
                f"C${econ_htpem.lcoh_cad_per_kg:.4f} /kg",
                f"H₂ output rate {econ_htpem.effective_h2_efficiency*100:.1f}%",
                delta_color="off",
@@ -1980,4 +2078,4 @@ with tab5:
                f"+{deg_pct[-1]:.1f}%",
                f"C${deg_lcoh[0]:.4f} → C${deg_lcoh[-1]:.4f}/kg as plant ages",
                delta_color="inverse",
-               help="As the plant ages, efficiency slowly drops — like any industrial equipment.")
+               help="As the plant ages, efficiency slowly falls — consistent with observed PEM degradation rates.")

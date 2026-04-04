@@ -1,0 +1,20 @@
+[theme]
+primaryColor = "#3E92CC"
+backgroundColor = "#13293D"
+secondaryBackgroundColor = "#16324F"
+textColor = "#E2E8F0"
+
+[ui]
+hideTopBar = false
+hideSidebarNav = false
+
+[browser]
+gatherUsageStats = false
+
+[server]
+enableStaticServing = false
+enableXsrfProtection = true
+maxUploadSize = 200
+maxMessageSize = 200
+port = 8501
+

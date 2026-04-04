@@ -564,10 +564,16 @@ class SensitivityEngine:
                 if baseline_lcoh > 0
                 else 0.0
             )
+            # [VIZ-1] Expose the train FC stack's degrading efficiency so the dashboard
+            # can derive annual_fuel_demand_kg (which rises as the stack ages).
+            # This is the physically interesting secondary variable for the degradation chart:
+            # as the FC loses efficiency, the train needs more H₂ to cover the same route.
+            fc_eff = apply_degradation(cfg.FC_SYSTEM_EFFICIENCY, year)
             curve.append({
                 "year":              year,
                 "lcoh":              r.lcoh_cad_per_kg,
-                "effective_yield":   r.effective_h2_efficiency,
-                "lcoh_increase_pct": lcoh_increase,   # cumulative drift from year-0
+                "effective_yield":   r.effective_h2_efficiency,   # electrolyzer yield (kept for compat)
+                "fc_efficiency_pct": round(fc_eff * 100, 2),       # train FC efficiency [%]
+                "lcoh_increase_pct": lcoh_increase,
             })
         return curve
