@@ -1,28 +1,6 @@
 """
-atlas_engine.py
-================
-Core computational logic for the Atlas-H2 Digital Twin.
-
-v6.2 — Antigravity Audit Pass
-  Audit fixes applied over v6.2 pre-flight:
-
-  [PHYSICS-1]  _waste_heat_output_kw: thermal_fraction clamped to ≥ 0.0 to prevent
-               negative waste heat when (efficiency + FC_PARASITIC_FRACTION) ≥ 1.
-               FC_PARASITIC_FRACTION now sourced from cfg instead of a magic number.
-
-  [ARCH-1]     EconomicsEngine.calculate_lcoh: ELECTROLYZER_BOP_FRACTION now sourced
-               from cfg.ELECTROLYZER_BOP_FRACTION instead of the in-line literal 0.25.
-
-  [ARCH-2]     SensitivityEngine.compute_lcoh_grid: same BOP_FRACTION fix; grid LCOH
-               and EconomicsEngine LCOH are now algebraically identical for identical
-               inputs — eliminating the crosshair mismatch on the sensitivity heatmap.
-
-  [PERF-1]     SensitivityEngine: O(N²) loop constants hoisted (v6.1 pre-flight,
-               retained and documented).
-
-  [STYLE-1]    Optional[float] = None annotations corrected throughout.
-  [STYLE-2]    PEP-8 alignment pass; all lines ≤ 99 characters.
-  [STYLE-3]    Type aliases tightened from Dict/List to dict/list (PEP-585, Py 3.9+).
+atlas_engine.py — Atlas-H2 Digital Infrastructure Twin v6.2
+Core computation: payload, economics, thermal, and sensitivity analysis.
 """
 
 from __future__ import annotations
@@ -32,40 +10,32 @@ from typing import Optional
 
 from config import cfg, TrainProfile
 
-# ── ROUTE CONSTANTS ───────────────────────────────────────────────────────────
+# baseline route constants derived from config.py
+_BASE_KM: float   = cfg.CORRIDOR_DISTANCE_KM   # 155 km
+_BASE_KWH: float  = cfg.TRIP_ENERGY_KWH         # 4000 kWh
+_BASE_HR: float   = 1.75                         # 1.75 hr at ~88.6 km/h
+_AVG_SPEED: float = _BASE_KM / _BASE_HR          # 88.57 km/h
 
-_BASE_KM: float   = cfg.CORRIDOR_DISTANCE_KM    # 155 km SJ-Moncton baseline
-_BASE_KWH: float  = cfg.TRIP_ENERGY_KWH         # 4 000 kWh at baseline
-_BASE_HR: float   = 1.75                        # 1.75 hr at ~88.6 km/h average
-_AVG_SPEED: float = _BASE_KM / _BASE_HR         # 88.57 km/h
-
-# FC stack degradation rate [fraction / year, relative]
-FC_DEGRADATION_RATE: float = 0.015
+FC_DEGRADATION_RATE: float = 0.015  # 1.5%/yr relative efficiency loss
 
 
 def apply_degradation(base_efficiency: float, age_years: int) -> float:
-    """
-    Effective FC efficiency after ``age_years`` of operation.
-
-    Model: η_eff = η₀ × (1 − 0.015 × age), floored at 50 % of η₀.
-    The floor prevents the slider from driving efficiency to physically
-    impossible values over long simulated lifetimes.
-    """
+    """FC efficiency after age_years. Floored at 50% of initial to prevent unphysical values."""
     degraded = base_efficiency * (1.0 - FC_DEGRADATION_RATE * age_years)
     return max(degraded, base_efficiency * 0.50)
 
 
 def corridor_trip_energy_kwh(corridor_km: float) -> float:
-    """Trip energy [kWh] scaled linearly with corridor distance."""
+    """Trip energy [kWh] scaled linearly from baseline corridor."""
     return corridor_km * (_BASE_KWH / _BASE_KM)
 
 
 def corridor_trip_duration_hr(corridor_km: float) -> float:
-    """Trip duration [hr] at SJ-Moncton average operating speed (88.57 km/h)."""
+    """Trip duration [hr] at average operating speed."""
     return corridor_km / _AVG_SPEED
 
 
-# ── DATA CLASSES ──────────────────────────────────────────────────────────────
+# data classes
 
 @dataclass
 class PayloadAnalysisResult:
@@ -118,8 +88,6 @@ class HeatRecoveryResult:
     net_annual_impact_cad: float
 
 
-# ── CLASS 1: PAYLOAD ANALYZER ─────────────────────────────────────────────────
-
 class PayloadAnalyzer:
     """Calculates onboard energy storage mass for all four propulsion profiles."""
 
@@ -128,7 +96,7 @@ class PayloadAnalyzer:
 
     @staticmethod
     def _mass_for_energy(energy_kwh: float, density_wh_kg: float) -> float:
-        """Return storage mass [kg]; returns 0.0 if density is non-positive."""
+        """Storage mass [kg]. Returns 0.0 if density is non-positive."""
         if density_wh_kg <= 0:
             return 0.0
         return (energy_kwh * 1_000.0) / density_wh_kg
@@ -144,8 +112,7 @@ class PayloadAnalyzer:
         profile = profile     if profile     is not None else cfg.INNOVATION_HTPEM
 
         storage_mass = (
-            0.0
-            if profile.energy_type == "diesel"
+            0.0 if profile.energy_type == "diesel"
             else self._mass_for_energy(ekwh, profile.system_energy_density_wh_kg)
         )
 
@@ -173,18 +140,14 @@ class PayloadAnalyzer:
         corridor_km: Optional[float] = None,
     ) -> dict[str, PayloadAnalysisResult]:
         return {
-            p.energy_type: self.compare_systems(
-                energy_kwh=energy_kwh, corridor_km=corridor_km, profile=p,
-            )
+            p.energy_type: self.compare_systems(energy_kwh=energy_kwh, corridor_km=corridor_km, profile=p)
             for p in cfg.ALL_PROFILES
         }
 
-    def print_report(
-        self, results: Optional[dict[str, PayloadAnalysisResult]] = None,
-    ) -> None:
+    def print_report(self, results: Optional[dict[str, PayloadAnalysisResult]] = None) -> None:
         results = results or self.compare_all_profiles()
         print("=" * 68)
-        print("  PAYLOAD ANALYSIS — 4-Way Comparison")
+        print("  PAYLOAD ANALYSIS -- 4-Way Comparison")
         print("=" * 68)
         for r in results.values():
             print(
@@ -194,13 +157,11 @@ class PayloadAnalyzer:
         print("=" * 68)
 
 
-# ── CLASS 2: ECONOMICS ENGINE ─────────────────────────────────────────────────
-
 class EconomicsEngine:
-    """Calculates LCOH for green H₂ from an on-site PEM electrolyzer in NB."""
+    """Calculates LCOH for green H2 from an on-site PEM electrolyzer in NB."""
 
     ANALYSIS_PERIOD_YEARS: int   = 10
-    ELEC_DEGRADATION_RATE: float = 0.010  # 1.0 %/yr electrolyzer H₂ yield drop
+    ELEC_DEGRADATION_RATE: float = 0.010  # 1.0%/yr electrolyzer H2 yield drop
 
     def __init__(
         self,
@@ -226,14 +187,10 @@ class EconomicsEngine:
         profile: Optional[TrainProfile] = None,
         system_age_years: int = 0,
     ) -> LCOHResult:
-        rate     = dynamic_electricity_rate if dynamic_electricity_rate is not None \
-                   else self.electricity_rate
-        capex_kw = dynamic_capex_per_kw     if dynamic_capex_per_kw     is not None \
-                   else self.capex_per_kw
-        cf       = dynamic_capacity_factor  if dynamic_capacity_factor  is not None \
-                   else self.capacity_factor
-        profile  = profile                  if profile                  is not None \
-                   else cfg.INNOVATION_HTPEM
+        rate     = dynamic_electricity_rate if dynamic_electricity_rate is not None else self.electricity_rate
+        capex_kw = dynamic_capex_per_kw     if dynamic_capex_per_kw     is not None else self.capex_per_kw
+        cf       = dynamic_capacity_factor  if dynamic_capacity_factor  is not None else self.capacity_factor
+        profile  = profile                  if profile                  is not None else cfg.INNOVATION_HTPEM
 
         base_h2_yield      = 0.70
         effective_h2_yield = max(
@@ -241,17 +198,14 @@ class EconomicsEngine:
             base_h2_yield * 0.60,
         )
 
-        # [ARCH-1] Use cfg.ELECTROLYZER_BOP_FRACTION — no more in-line 0.25 magic number.
+        # BOP discount sourced from cfg.ELECTROLYZER_BOP_FRACTION
         gross_capex    = self.electrolyzer_size_kw * capex_kw
         bop_saving     = gross_capex * cfg.ELECTROLYZER_BOP_FRACTION * profile.capex_purification_discount_pct
         adjusted_capex = gross_capex - bop_saving
         itc_savings    = adjusted_capex * self.itc_rate
         net_capex      = adjusted_capex - itc_savings
 
-        # [ECON-1 FIX] OPEX is a fraction of the cost of equipment actually purchased
-        # (adjusted_capex), not of the pre-discount gross price.  For HTPEM the PSA
-        # purification unit has been eliminated; maintaining it on gross_capex added
-        # ~C$900/yr in phantom maintenance cost for equipment that doesn't exist.
+        # OPEX on adjusted_capex; avoids phantom maintenance cost for removed equipment
         annual_opex      = adjusted_capex * self.opex_rate
         annual_hours     = 8_760.0 * cf
         annual_elec_kwh  = self.electrolyzer_size_kw * annual_hours
@@ -281,44 +235,32 @@ class EconomicsEngine:
             lcoh_cad_per_kg=round(lcoh_per_kg, 4),
             lcoh_cad_per_kwh=round(lcoh_per_kg / cfg.H2_ENERGY_DENSITY_KWH_KG, 4),
             carbon_abatement_notes=(
-                f"NB grid {cfg.NB_GRID_CARBON_INTENSITY} kg CO₂/kWh → "
-                f"{cfg.FEDERAL_H2_ITC * 100:.0f}% Clean H₂ ITC applies."
+                f"NB grid {cfg.NB_GRID_CARBON_INTENSITY} kg CO2/kWh -> "
+                f"{cfg.FEDERAL_H2_ITC * 100:.0f}% Clean H2 ITC applies."
             ),
         )
 
     def print_report(self, result: Optional[LCOHResult] = None) -> None:
         r = result or self.calculate_lcoh()
         print("=" * 60)
-        print(f"  ECONOMICS ENGINE — LCOH · {r.profile_name}")
+        print(f"  ECONOMICS ENGINE -- LCOH · {r.profile_name}")
         print("=" * 60)
         print(f"  Stack Age                   : {r.system_age_years} yr")
         print(f"  LCOH                        : C${r.lcoh_cad_per_kg:>8.4f} / kg")
         print("=" * 60)
 
 
-# ── CLASS 3: THERMAL EFFICIENCY MODULE ───────────────────────────────────────
-
 class ThermalEfficiencyModule:
-    """Quantifies the annual thermal energy impact for all four profiles."""
+    """Quantifies annual thermal energy impact for all four propulsion profiles."""
 
-    HTPEM_THRESHOLD_C: float       = 100.0  # min stack temp [°C] for waste-heat cabin heating
+    # min stack temp for waste-heat cabin heating
+    HTPEM_THRESHOLD_C: float = 100.0
 
-    # [THERM-1 FIX] Calibrated from first principles: the LTPEM/Battery profiles both carry
-    # a 50 kW electric HVAC unit (cfg.BASELINE_LTPEM.hvac_power_draw_kw) sized for the
-    # SJ-Moncton design-point ΔT of 30 °C (cabin 20 °C − winter −10 °C).
-    # → BUILDING_HEAT_LOSS_COEFF = 50 kW / 30 °C = 1.6̄67 kW/°C.
-    #
-    # Previous value (0.15 kW/°C) gave cabin_demand = 4.5 kW at −10 °C, 11× below the
-    # 50 kW HVAC draw used for the LTPEM/Battery penalty.  That asymmetry caused
-    # HTPEM's waste-heat savings to be understated by the same factor (~11×), while
-    # the LTPEM/Battery penalty was computed correctly.  With the corrected coefficient:
-    #   cabin_demand(−10 °C) = 1.6̄67 × 30 = 50 kW  (matches HVAC rated power)
-    #   HTPEM elec_saved/trip = 50 kW × 1.75 hr = 87.5 kWh  ✓
-    #   LTPEM hvac_kwh/trip   = 50 kW × 1.75 hr = 87.5 kWh  ✓  (same model, symmetric)
+    # UA coefficient from config: 50 kW HVAC / 30C design delta = 1.6667 kW/C
     BUILDING_HEAT_LOSS_COEFF: float = (
         cfg.BASELINE_LTPEM.hvac_power_draw_kw
         / (cfg.CABIN_TARGET_TEMP_C - cfg.WINTER_AMBIENT_TEMP_C)
-    )  # = 50 / 30 ≈ 1.6667 kW/°C
+    )
 
     def __init__(
         self,
@@ -338,16 +280,9 @@ class ThermalEfficiencyModule:
 
     def _waste_heat_output_kw(self, efficiency: float) -> float:
         """
-        Waste heat [kW] available from the FC stack.
-
-        Energy balance (per unit gross H₂ input):
-            gross_input = net_electrical / η
-            thermal_loss = gross_input × max(0, 1 − η − parasitic)
-
-        [PHYSICS-1] thermal_fraction is clamped to ≥ 0.  Without the clamp,
-        if efficiency + FC_PARASITIC_FRACTION ≥ 1 (only reachable via extreme
-        slider values or future model changes), the formula returns negative
-        waste heat, silently corrupting annual_savings and net_annual_impact.
+        Waste heat [kW] from the FC stack.
+        thermal_fraction clamped to >= 0 to prevent negative output
+        when efficiency + FC_PARASITIC_FRACTION >= 1.
         """
         if efficiency <= 0:
             return 0.0
@@ -355,10 +290,7 @@ class ThermalEfficiencyModule:
         return (self.fc_power_kw / efficiency) * thermal_fraction
 
     def _cabin_demand_kw(self, ambient_temp: float) -> float:
-        """
-        Cabin heating demand [kW] via a simple UA·ΔT model.
-        Returns 0.0 when ambient ≥ cabin setpoint (no heating needed).
-        """
+        """Cabin heating demand [kW] via UA*dT. Returns 0 if ambient >= setpoint."""
         return max(0.0, self.BUILDING_HEAT_LOSS_COEFF * (self.target_cabin_temp_c - ambient_temp))
 
     def calculate_heat_recovery(
@@ -373,8 +305,7 @@ class ThermalEfficiencyModule:
         base_eff  = dynamic_efficiency       if dynamic_efficiency       is not None else self.fc_efficiency
         amb_temp  = dynamic_ambient_temp     if dynamic_ambient_temp     is not None else self.ambient_temp_c
         ckm       = dynamic_corridor_km      if dynamic_corridor_km      is not None else self.corridor_km
-        elec_rate = dynamic_electricity_rate if dynamic_electricity_rate is not None \
-                    else cfg.NB_POWER_INDUSTRIAL_RATE
+        elec_rate = dynamic_electricity_rate if dynamic_electricity_rate is not None else cfg.NB_POWER_INDUSTRIAL_RATE
         profile   = profile                  if profile                  is not None else cfg.INNOVATION_HTPEM
 
         efficiency       = apply_degradation(base_eff, system_age_years)
@@ -449,7 +380,7 @@ class ThermalEfficiencyModule:
     def print_report(self, results: Optional[dict[str, HeatRecoveryResult]] = None) -> None:
         results = results or self.calculate_all_profiles()
         print("=" * 68)
-        print("  THERMAL MODULE — 4-Way Comparison")
+        print("  THERMAL MODULE -- 4-Way Comparison")
         print("=" * 68)
         for r in results.values():
             print(
@@ -461,26 +392,14 @@ class ThermalEfficiencyModule:
         print("=" * 68)
 
 
-# ── CLASS 4: SENSITIVITY ENGINE ───────────────────────────────────────────────
-
 class SensitivityEngine:
     """
-    Produces the 2-D LCOH sensitivity grid (electricity rate × CAPEX) and the
-    degradation curve (LCOH vs stack age).
-
-    Grid vs EconomicsEngine algebraic equivalence (v6.2 fix):
-    ──────────────────────────────────────────────────────────
-    The grid inner loop replicates the LCOH formula from EconomicsEngine rather
-    than calling it, for O(N²) performance (256 evaluations without 256 full
-    LCOHResult object instantiations). After [ARCH-1] and [ARCH-2] both use
-    cfg.ELECTROLYZER_BOP_FRACTION, so grid[i, j] == EconomicsEngine.calculate_lcoh(
-        dynamic_electricity_rate=rates[j], dynamic_capex_per_kw=capexes[i], ...
-    ).lcoh_cad_per_kg for all (i, j) at any given age, eliminating the heatmap
-    crosshair mismatch that existed in v6.1.
+    Produces the 2-D LCOH grid (electricity rate x CAPEX) and degradation curve.
+    Grid uses the same LCOH formula as EconomicsEngine for algebraic equivalence.
     """
 
     ANALYSIS_PERIOD_YEARS: int   = 10
-    ELEC_DEGRADATION_RATE: float = 0.010  # 1.0 %/yr electrolyzer H₂ yield drop
+    ELEC_DEGRADATION_RATE: float = 0.010  # 1.0%/yr electrolyzer H2 yield drop
     BASE_H2_YIELD: float         = 0.70
 
     def compute_lcoh_grid(
@@ -509,12 +428,11 @@ class SensitivityEngine:
             self.BASE_H2_YIELD * 0.60,
         )
 
-        # ── Hoist all loop-invariant terms out of the O(N²) body ─────────────
-        annual_hours      = 8_760.0 * capacity_factor
-        annual_elec_base  = electrolyzer_size_kw * annual_hours  # kWh — rate factored in inner loop
-        annual_h2_kg      = (annual_elec_base * effective_yield) / cfg.H2_ENERGY_DENSITY_KWH_KG
-        total_h2          = annual_h2_kg * self.ANALYSIS_PERIOD_YEARS
-        # [ARCH-2] BOP discount fraction sourced from cfg — matches EconomicsEngine exactly.
+        # hoist loop-invariant terms
+        annual_hours     = 8_760.0 * capacity_factor
+        annual_elec_base = electrolyzer_size_kw * annual_hours
+        annual_h2_kg     = (annual_elec_base * effective_yield) / cfg.H2_ENERGY_DENSITY_KWH_KG
+        total_h2         = annual_h2_kg * self.ANALYSIS_PERIOD_YEARS
         bop_discount_rate = cfg.ELECTROLYZER_BOP_FRACTION * profile.capex_purification_discount_pct
 
         z_grid: list[list[float]] = []
@@ -524,7 +442,6 @@ class SensitivityEngine:
             bop_saving       = gross_capex * bop_discount_rate
             adj_capex        = gross_capex - bop_saving
             net_capex        = adj_capex - adj_capex * itc_rate
-            # [ECON-1 FIX] OPEX on adj_capex — mirrors EconomicsEngine fix for algebraic equivalence.
             annual_opex      = adj_capex * opex_rate
             base_fixed_costs = net_capex + (annual_opex * self.ANALYSIS_PERIOD_YEARS)
 
@@ -555,8 +472,9 @@ class SensitivityEngine:
             opex_rate=opex_rate,
             capacity_factor=capacity_factor,
         )
-        baseline_lcoh  = engine.calculate_lcoh(profile=profile, system_age_years=0).lcoh_cad_per_kg
+        baseline_lcoh = engine.calculate_lcoh(profile=profile, system_age_years=0).lcoh_cad_per_kg
         curve: list[dict] = []
+
         for year in range(max_age_years + 1):
             r = engine.calculate_lcoh(profile=profile, system_age_years=year)
             lcoh_increase = (
@@ -564,16 +482,14 @@ class SensitivityEngine:
                 if baseline_lcoh > 0
                 else 0.0
             )
-            # [VIZ-1] Expose the train FC stack's degrading efficiency so the dashboard
-            # can derive annual_fuel_demand_kg (which rises as the stack ages).
-            # This is the physically interesting secondary variable for the degradation chart:
-            # as the FC loses efficiency, the train needs more H₂ to cover the same route.
+            # fc_efficiency_pct: train stack efficiency used to derive annual H2 demand in dashboard
             fc_eff = apply_degradation(cfg.FC_SYSTEM_EFFICIENCY, year)
             curve.append({
                 "year":              year,
                 "lcoh":              r.lcoh_cad_per_kg,
-                "effective_yield":   r.effective_h2_efficiency,   # electrolyzer yield (kept for compat)
-                "fc_efficiency_pct": round(fc_eff * 100, 2),       # train FC efficiency [%]
+                "effective_yield":   r.effective_h2_efficiency,
+                "fc_efficiency_pct": round(fc_eff * 100, 2),
                 "lcoh_increase_pct": lcoh_increase,
             })
+
         return curve

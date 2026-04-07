@@ -1,26 +1,5 @@
-"""
-dashboard.py — v9.2 Clinical-Grade Polish
-==========================================
-Atlas-H2 | Digital Infrastructure Twin
-
-Changes over v9.1:
-  [CSS-1]    .stMetricLabel → 1.1rem; .stMetricValue → 2.2rem / weight 600.
-             These were previously 0.75rem and 1.75rem — unreadable on non-retina screens.
-  [CSS-2]    .stMarkdown p, li → 1.15rem / 1.6 line-height / color #E2E8F0.
-             .stMarkdown h3 → 1.4rem / weight 600.
-             Callouts confirmed at 0.95rem / padding 16px 20px.
-  [COPY-1]   HELP_HTPEM rewritten to the mandated clinical paragraph explaining
-             the PBI acid-doped membrane physics.
-  [COPY-2]   Emoji fully purged: heating scorecard table (♻️, ⚡) removed.
-             All remaining decorative unicode stripped.
-  [COPY-3]   HTPEM label confirmed as "RECOMMENDED" (not "Winner").
-  [COPY-4]   Guide tab: mandatory LTPEM vs HTPEM physics paragraph inserted as a
-             dedicated "Membrane Chemistry" callout block.
-  [VIZ-1]    Degradation chart (Tab 5) secondary Y-axis confirmed: "Annual H2 Demand (kg)"
-             rising as engine ages, 30% range padding, both axes colour-coded.
-  [VIZ-2]    All st.plotly_chart calls confirmed with config={"displayModeBar": False}.
-  [VIZ-3]    Sign-aware LCOA metric: negative = green "Saves C$X/tonne" delta.
-  [MATH]     No backend changes. All logic delegated to atlas_engine / carbon_abatement.
+"""dashboard.py -- Atlas-H2 Digital Infrastructure Twin v9.2
+Streamlit dashboard for the 4-way rail propulsion comparison.
 
 Run with:
     streamlit run dashboard.py
@@ -48,13 +27,7 @@ from atlas_engine import (
 from carbon_abatement import CarbonAbatementCalculator
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# BRAND COLOR DICTIONARY — Single source of truth for all chart colors
-#   diesel   → Slate Gray
-#   battery  → Amber
-#   h2_ltpem → Sky Blue
-#   h2_htpem → Emerald (recommended technology)
-# ════════════════════════════════════════════════════════════════════════════
+# chart colors by energy_type
 
 BRAND_COLORS: dict[str, str] = {
     "diesel":   "#64748B",   # Slate gray
@@ -63,13 +36,13 @@ BRAND_COLORS: dict[str, str] = {
     "h2_htpem": "#10B981",   # Emerald green
 }
 
-# Tonal palettes for pie chart slices (light → dark within each brand color)
+# tonal palettes for pie slices
 BRAND_TONES: dict[str, list[str]] = {
     "h2_ltpem": ["#075985", "#0284C7", "#38BDF8"],
     "h2_htpem": ["#064E3B", "#059669", "#6EE7B7"],
 }
 
-# Chart axis and legend labels — no decorative symbols
+# display labels for chart axes and legends
 PROFILE_LABELS: dict[str, str] = {
     "diesel":   "Legacy Diesel",
     "battery":  "Battery EV",
@@ -78,8 +51,7 @@ PROFILE_LABELS: dict[str, str] = {
 }
 
 
-# ── TOOLTIP DEFINITIONS ───────────────────────────────────────────────────────
-
+# TOOLTIP DEFINITIONS
 HELP_LCOH = (
     "Levelized Cost of Hydrogen: the all-in cost to produce one kg of H₂, "
     "including amortised equipment cost, annual maintenance, and electricity over the analysis period."
@@ -89,7 +61,6 @@ HELP_LCOA = (
     "calculated as total H₂ system cost minus avoided diesel purchases divided by CO₂ abated. "
     "A negative value indicates the H₂ system costs less to operate than the diesel baseline."
 )
-# [COPY-1] Rewritten to the mandated clinical paragraph explaining PBI membrane physics.
 HELP_HTPEM = (
     "The core difference lies in the membrane's chemical composition: standard LTPEM units use "
     "a water-saturated polymer (Nafion) that fails if temperatures exceed 80°C and the water "
@@ -105,8 +76,7 @@ HELP_GRAVIMETRIC = (
 )
 
 
-# ── PAGE CONFIG ───────────────────────────────────────────────────────────────
-
+# PAGE CONFIG
 st.set_page_config(
     page_title="Atlas-H2 | Demilade Giwa",
     page_icon="🚆",
@@ -114,8 +84,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── UI PALETTE ────────────────────────────────────────────────────────────────
-
+# UI PALETTE
 C_BG      = "#13293D"
 C_SURFACE = "#16324F"
 C_BORDER  = "#18435A"
@@ -134,13 +103,10 @@ C_BATT   = BRAND_COLORS["battery"]    # "#F59E0B" amber
 C_DIESEL = BRAND_COLORS["diesel"]     # "#64748B" slate
 
 
-# ── GLOBAL CSS ────────────────────────────────────────────────────────────────
-
+# GLOBAL CSS
 st.markdown(f"""
 <style>
-/* ═══════════════════════════════════════════════════════════
-   1. ROOT & BASE
-══════════════════════════════════════════════════════════════ */
+/* ROOT & BASE */
 :root {{
   --text-scale-factor: 1.2;
 }}
@@ -180,9 +146,7 @@ h1 {{ font-size: 1.5rem; line-height: 1.3; }}
 h2 {{ font-size: 1.05rem; }}
 h3 {{ font-size: 0.95rem; letter-spacing: 0.01em; }}
 
-/* ═══════════════════════════════════════════════════════════
-   2. KEYFRAMES
-══════════════════════════════════════════════════════════════ */
+/* KEYFRAMES */
 @keyframes fadeInUp {{
     from {{ opacity: 0; transform: translateY(16px); }}
     to   {{ opacity: 1; transform: translateY(0); }}
@@ -227,9 +191,7 @@ h3 {{ font-size: 0.95rem; letter-spacing: 0.01em; }}
     100% {{ background-position:  200% center; }}
 }}
 
-/* ═══════════════════════════════════════════════════════════
-   3. ENTRANCE ANIMATIONS
-══════════════════════════════════════════════════════════════ */
+/* ENTRANCE ANIMATIONS */
 .kpi-card              {{ animation: fadeInUp 0.44s cubic-bezier(0.22, 1, 0.36, 1) both; }}
 .kpi-card:nth-child(1) {{ animation-delay: 0.04s; }}
 .kpi-card:nth-child(2) {{ animation-delay: 0.10s; }}
@@ -271,9 +233,7 @@ h3 {{ font-size: 0.95rem; letter-spacing: 0.01em; }}
 .legend-pill:nth-child(3) {{ animation-delay: 0.14s; }}
 .legend-pill:nth-child(4) {{ animation-delay: 0.19s; }}
 
-/* ═══════════════════════════════════════════════════════════
-   4. KPI ROW
-══════════════════════════════════════════════════════════════ */
+/* KPI ROW */
 .kpi-row {{
     display: flex;
     gap: 12px;
@@ -372,10 +332,7 @@ h3 {{ font-size: 0.95rem; letter-spacing: 0.01em; }}
 .kpi-delta.neu  {{ color: {C_MUTED};  }}
 .kpi-delta.warn {{ color: {C_ORANGE}; }}
 
-/* ═══════════════════════════════════════════════════════════
-   5. STREAMLIT METRICS  [CSS-1] — v9.2 FIX
-      Label: 1.1rem · Value: 2.2rem / weight 600
-══════════════════════════════════════════════════════════════ */
+
 [data-testid="stMetric"] {{
     background: {C_SURFACE};
     border: 1px solid {C_BORDER};
@@ -392,7 +349,7 @@ h3 {{ font-size: 0.95rem; letter-spacing: 0.01em; }}
     box-shadow: 0 4px 20px {C_HTPEM}14, 0 8px 32px rgba(0,0,0,0.2);
     transform: translateY(-2px);
 }}
-/* [CSS-1] Label raised from 0.75rem → 1.1rem */
+/* metric label size */
 [data-testid="stMetricLabel"] {{
     color: {C_MUTED};
     font-size: 1.1rem !important;
@@ -402,7 +359,7 @@ h3 {{ font-size: 0.95rem; letter-spacing: 0.01em; }}
     word-break: break-word;
     line-height: 1.3;
 }}
-/* [CSS-1] Value raised from 1.75rem → 2.2rem, weight 600 */
+/* metric value size */
 [data-testid="stMetricValue"] {{
     color: {C_TEXT};
     font-weight: 600 !important;
@@ -421,9 +378,7 @@ h3 {{ font-size: 0.95rem; letter-spacing: 0.01em; }}
     white-space: normal;
 }}
 
-/* ═══════════════════════════════════════════════════════════
-   6. TABS
-══════════════════════════════════════════════════════════════ */
+/* TABS */
 .stTabs [data-baseweb="tab-list"] {{
     background: {C_SURFACE};
     border-radius: 10px 10px 0 0;
@@ -451,9 +406,7 @@ h3 {{ font-size: 0.95rem; letter-spacing: 0.01em; }}
     background: {C_ACCENT2}22;
 }}
 
-/* ═══════════════════════════════════════════════════════════
-   7. SIDEBAR
-══════════════════════════════════════════════════════════════ */
+/* SIDEBAR */
 section[data-testid="stSidebar"],
 section[data-testid="stSidebar"] .block-container {{
     background: {C_SURFACE};
@@ -478,9 +431,7 @@ section[data-testid="stSidebar"] .block-container {{
     white-space: normal;
 }}
 
-/* ═══════════════════════════════════════════════════════════
-   8. BUTTONS
-══════════════════════════════════════════════════════════════ */
+/* BUTTONS */
 div[data-testid="stButton"] button,
 div[data-testid="stDownloadButton"] button {{
     width: 100%;
@@ -517,9 +468,7 @@ div[data-testid="stDownloadButton"] button:hover {{
     transform: translateY(-1px);
 }}
 
-/* ═══════════════════════════════════════════════════════════
-   9. MISC
-══════════════════════════════════════════════════════════════ */
+/* MISC */
 hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
 [data-testid="stDataFrame"] {{
     border: 1px solid {C_BORDER};
@@ -534,9 +483,7 @@ hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
     white-space: normal;
 }}
 
-/* ═══════════════════════════════════════════════════════════
-   10. EYEBROW / LEGEND / BADGES
-══════════════════════════════════════════════════════════════ */
+
 .eyebrow {{
     font-size: 0.62rem;
     font-weight: 700;
@@ -599,9 +546,7 @@ hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
     white-space: normal;
 }}
 
-/* ═══════════════════════════════════════════════════════════
-   11. SIDEBAR STATUS / COLOR LEGEND
-══════════════════════════════════════════════════════════════ */
+
 .status-dot {{
     display: inline-block;
     width: 7px; height: 7px;
@@ -670,9 +615,7 @@ hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
     margin-left: auto;
 }}
 
-/* ═══════════════════════════════════════════════════════════
-   12. CALLOUTS  [CSS-1] — padding 16px 20px / font 0.95rem
-══════════════════════════════════════════════════════════════ */
+
 .info-callout {{
     background: {C_HTPEM}0b;
     border: 1px solid {C_HTPEM}2a;
@@ -701,9 +644,7 @@ hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
 }}
 .warn-callout strong {{ color: {C_ORANGE}; font-weight: 600; }}
 
-/* ═══════════════════════════════════════════════════════════
-   13. SECTION ACCENT
-══════════════════════════════════════════════════════════════ */
+/* SECTION ACCENT */
 .section-accent {{
     border-left: 3px solid {C_HTPEM};
     padding-left: 10px;
@@ -722,9 +663,7 @@ hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
     color: {C_MUTED};
 }}
 
-/* ═══════════════════════════════════════════════════════════
-   14. HEADER GRADIENT ACCENT BAR — 2px, 8s loop
-══════════════════════════════════════════════════════════════ */
+
 .header-accent-bar {{
     height: 2px;
     width: 100%;
@@ -744,9 +683,7 @@ hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
     opacity: 0.90;
 }}
 
-/* ═══════════════════════════════════════════════════════════
-   15. GUIDE TAB ELEMENTS
-══════════════════════════════════════════════════════════════ */
+/* GUIDE TAB ELEMENTS */
 .how-to-chip {{
     display: inline-flex;
     align-items: center;
@@ -765,11 +702,7 @@ hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
     white-space: normal;
 }}
 
-/* ═══════════════════════════════════════════════════════════
-   16. MARKDOWN BODY TYPOGRAPHY  [CSS-2] — v9.2 FIX
-       p/li: 1.15rem / 1.6 line-height / color #E2E8F0
-       h3:   1.4rem  / weight 600
-══════════════════════════════════════════════════════════════ */
+
 .stMarkdown p, .stMarkdown li {{
     font-size: 1.15rem !important;
     line-height: 1.6 !important;
@@ -790,8 +723,7 @@ hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
 """, unsafe_allow_html=True)
 
 
-# ── CONSTANTS ─────────────────────────────────────────────────────────────────
-
+# CONSTANTS
 ALL_PROFILES  = cfg.ALL_PROFILES
 PROFILE_NAMES = [PROFILE_LABELS[p.energy_type] for p in ALL_PROFILES]
 PROFILE_COLORS_LIST = [BRAND_COLORS[p.energy_type] for p in ALL_PROFILES]
@@ -811,8 +743,7 @@ PLOTLY_BASE = dict(
 )
 
 
-# ── SESSION STATE ─────────────────────────────────────────────────────────────
-
+# SESSION STATE
 DEFAULTS: dict = {
     "corridor_km":      int(cfg.CORRIDOR_DISTANCE_KM),
     "system_age_years": 0,
@@ -836,8 +767,7 @@ def reset_to_defaults() -> None:
         st.session_state[k] = v
 
 
-# ── ROUTE LABEL ───────────────────────────────────────────────────────────────
-
+# ROUTE LABEL
 def route_label(km: int) -> str:
     if 140 <= km <= 170: return f"Saint John to Moncton ({km} km)"
     if  95 <= km <= 115: return f"Saint John to Fredericton ({km} km)"
@@ -847,8 +777,7 @@ def route_label(km: int) -> str:
     return f"Custom Route ({km} km)"
 
 
-# ── SIDEBAR ───────────────────────────────────────────────────────────────────
-
+# SIDEBAR
 with st.sidebar:
     st.markdown(
         '<div class="eyebrow" style="margin-bottom:8px;">Atlas-H2 · By Demilade Giwa</div>',
@@ -861,7 +790,7 @@ with st.sidebar:
     st.button("Reset to Defaults", on_click=reset_to_defaults, use_container_width=True)
     st.divider()
 
-    # ── COLOR LEGEND ─────────────────────────────────────────────────────────
+    # color legend
     st.markdown(f"""
     <div class="color-legend">
       <div class="color-legend-title">Colour Key</div>
@@ -927,8 +856,7 @@ with st.sidebar:
     )
 
 
-# ── READ SLIDERS ──────────────────────────────────────────────────────────────
-
+# READ SLIDERS
 corridor_km      = st.session_state.get("corridor_km",      DEFAULTS["corridor_km"])
 system_age_years = st.session_state.get("system_age_years", DEFAULTS["system_age_years"])
 electrolyzer_kw  = st.session_state.get("electrolyzer_kw",  DEFAULTS["electrolyzer_kw"])
@@ -945,7 +873,7 @@ diesel_price     = round(diesel_price,     4)
 trip_energy_kwh  = int(corridor_trip_energy_kwh(corridor_km))
 
 
-# ── SIMULATION (cached — no changes to backend logic) ────────────────────────
+# run all engines, cached by slider values
 
 @st.cache_data
 def run_all(
@@ -981,7 +909,7 @@ def run_all(
         system_age_years=system_age_years,
     )
     # [LCOA-1 FIX] annual_h2_cost_cad must include amortised CAPEX so that the LCOA
-    # calculation reflects the true all-in cost of the H₂ system.
+    # annual H2 cost includes amortised CAPEX so LCOA reflects true all-in cost
     annual_h2_cost_cad = (
         econ_htpem.net_capex_after_itc_cad / EconomicsEngine.ANALYSIS_PERIOD_YEARS
         + econ_htpem.annual_opex_cad
@@ -1026,8 +954,7 @@ econ_htpem: LCOHResult                       = results["econ_htpem"]
 carbon                                       = results["carbon"]
 
 
-# ── CSV EXPORT ────────────────────────────────────────────────────────────────
-
+# CSV EXPORT
 @st.cache_data
 def build_export_csv(
     _corridor_km: int, _system_age_years: int, _electrolyzer_kw: int,
@@ -1100,8 +1027,7 @@ with st.sidebar:
     )
 
 
-# ── HELPERS ───────────────────────────────────────────────────────────────────
-
+# HELPERS
 def kpi_row(cards: list[dict]) -> None:
     html = '<div class="kpi-row">'
     for c in cards:
@@ -1152,8 +1078,7 @@ def _axis_lines(fig: go.Figure) -> None:
     )
 
 
-# ── PAGE HEADER ───────────────────────────────────────────────────────────────
-
+# PAGE HEADER
 age_color      = C_GREEN if system_age_years == 0 else (C_ORANGE if system_age_years < 6 else C_RED)
 age_badge_text = (
     "New Engine"
@@ -1180,8 +1105,7 @@ st.markdown(
 st.markdown('<div class="header-accent-bar"></div>', unsafe_allow_html=True)
 
 
-# ── KPI ROW ───────────────────────────────────────────────────────────────────
-
+# KPI ROW
 htpem_payload   = payload["h2_htpem"]
 htpem_thermal   = thermal["h2_htpem"]
 ltpem_thermal   = thermal["h2_ltpem"]
@@ -1227,8 +1151,7 @@ kpi_row([
 st.divider()
 
 
-# ── TABS ──────────────────────────────────────────────────────────────────────
-
+# TABS
 tab_guide, tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Guide",
     "Weight Penalty",
@@ -1239,13 +1162,11 @@ tab_guide, tab1, tab2, tab3, tab4, tab5 = st.tabs([
 ])
 
 
-# ════════════════════════════════════════════════════════════════════════════
 # TAB 0 · GUIDE
-# ════════════════════════════════════════════════════════════════════════════
 
 with tab_guide:
 
-    # ── HEADER PANEL ─────────────────────────────────────────────────────────
+    # header panel
     st.markdown(f"""
     <div style="
         background: linear-gradient(135deg, {C_SURFACE} 0%, {C_ACCENT2}3a 55%, {C_SURFACE} 100%);
@@ -1298,7 +1219,7 @@ with tab_guide:
     </div>
     """, unsafe_allow_html=True)
 
-    # ── MEMBRANE CHEMISTRY — MANDATED TECHNICAL PARAGRAPH [COPY-4] ───────────
+    # membrane chemistry explanation
     st.markdown(f"""
     <p style="margin:0 0 14px;font-size:0.62rem;font-weight:700;letter-spacing:0.16em;
               text-transform:uppercase;color:{C_LTPEM}aa;">Fuel Cell Technology: Membrane Chemistry</p>
@@ -1317,7 +1238,7 @@ with tab_guide:
     </div>
     """, unsafe_allow_html=True)
 
-    # ── THERMAL CONSTRAINTS (full width) ─────────────────────────────────────
+    # thermal constraint cards
     st.markdown(f"""
     <p style="margin:18px 0 14px;font-size:0.62rem;font-weight:700;letter-spacing:0.16em;
               text-transform:uppercase;color:{C_RED}aa;">Thermal Constraint: Sub-Zero Operation</p>
@@ -1377,7 +1298,7 @@ with tab_guide:
 
     st.divider()
 
-    # ── NAVIGATION ────────────────────────────────────────────────────────────
+    # navigation chips
     st.markdown(f"""
     <div style="
         background:{C_SURFACE};border:1px solid {C_BORDER};
@@ -1403,7 +1324,7 @@ with tab_guide:
     </div>
     """, unsafe_allow_html=True)
 
-    # ── GLOSSARY ──────────────────────────────────────────────────────────────
+    # glossary cards
     st.markdown("<br>", unsafe_allow_html=True)
     gc1, gc2, gc3, gc4 = st.columns(4)
     gloss = [
@@ -1430,9 +1351,7 @@ with tab_guide:
             """, unsafe_allow_html=True)
 
 
-# ════════════════════════════════════════════════════════════════════════════
 # TAB 1 · WEIGHT PENALTY (Payload)
-# ════════════════════════════════════════════════════════════════════════════
 
 with tab1:
     with st.container():
@@ -1512,9 +1431,7 @@ with tab1:
         )
 
 
-# ════════════════════════════════════════════════════════════════════════════
 # TAB 2 · FUEL COST (LCOH)
-# ════════════════════════════════════════════════════════════════════════════
 
 with tab2:
     age_note = (
@@ -1607,9 +1524,7 @@ with tab2:
         )
 
 
-# ════════════════════════════════════════════════════════════════════════════
 # TAB 3 · WINTER HEATING (Thermal)
-# ════════════════════════════════════════════════════════════════════════════
 
 with tab3:
     trip_dur = thermal["h2_htpem"].trip_duration_hr
@@ -1697,7 +1612,6 @@ with tab3:
             f'<p>Annual C$ impact per technology</p></div>',
             unsafe_allow_html=True,
         )
-        # [COPY-2] Emojis (♻️, ⚡) removed from heating column
         rows = []
         for p in ALL_PROFILES:
             r = thermal[p.energy_type]
@@ -1734,9 +1648,7 @@ with tab3:
             )
 
 
-# ════════════════════════════════════════════════════════════════════════════
 # TAB 4 · CARBON IMPACT
-# ════════════════════════════════════════════════════════════════════════════
 
 with tab4:
     with st.container():
@@ -1807,7 +1719,6 @@ with tab4:
             f'<p>Cumulative impact vs keeping the diesel train</p></div>',
             unsafe_allow_html=True,
         )
-        # [VIZ-3] Sign-aware LCOA: negative value is displayed as a saving (green delta)
         _lcoa = carbon.lcoa_cad_per_tonne
         _lcoa_cell = (
             f"**Saves C${abs(_lcoa):,.0f}/t**" if _lcoa <= 0
@@ -1826,17 +1737,16 @@ with tab4:
         """)
         st.divider()
 
-        # [VIZ-3] Sign-aware LCOA metric with green delta when self-financing
         if _lcoa <= 0:
             _lcoa_label  = "Net Savings per Tonne of CO₂ Removed"
             _lcoa_value  = f"Saves C${abs(_lcoa):,.0f} / tonne"
             _lcoa_delta  = "Net operational cost is below diesel — switch is self-financing."
-            _lcoa_dcolor = "normal"   # green — a saving is a positive result
+            _lcoa_dcolor = "normal"   # green: saving
         else:
             _lcoa_label  = "Net Cost per Tonne of CO₂ Removed"
             _lcoa_value  = f"C${_lcoa:,.0f} / tonne"
             _lcoa_delta  = f"{carbon.total_co2_abated_tonnes:,.0f} t removed over 5 years"
-            _lcoa_dcolor = "inverse"  # red — a cost is a negative result
+            _lcoa_dcolor = "inverse"  # red: paying to abate
 
         st.metric(
             _lcoa_label,
@@ -1869,9 +1779,7 @@ with tab4:
         )
 
 
-# ════════════════════════════════════════════════════════════════════════════
 # TAB 5 · SENSITIVITY
-# ════════════════════════════════════════════════════════════════════════════
 
 with tab5:
     with st.container():
@@ -1968,7 +1876,6 @@ with tab5:
             for d in deg_curve
         ]
 
-        # [VIZ-1] Annual H₂ demand rises as FC stack ages (lower efficiency → more H₂ per km).
         # Demand scaled inversely with per-year efficiency relative to year-0 baseline.
         base_h2_demand_kg = (
             cfg.AVG_CONSUMPTION_KG_KM * corridor_km * trips_per_year
@@ -1998,7 +1905,6 @@ with tab5:
                 hovertemplate=f"<b>Current year</b><br>C${cur_lcoh:.4f}/kg<extra></extra>",
                 showlegend=False,
             )
-        # [VIZ-1] Secondary Y-axis: Annual H₂ Demand (kg) — rises as engine ages
         fig_deg.add_scatter(
             x=deg_years, y=annual_h2_demand,
             name="Annual H₂ Demand (kg)",
@@ -2007,7 +1913,6 @@ with tab5:
             yaxis="y2",
             hovertemplate="Year %{x}<br>H₂ Demand: <b>%{y:,.0f} kg/yr</b><extra></extra>",
         )
-        # [VIZ-1] 30% padding on both ends of the demand axis range
         demand_min = min(annual_h2_demand)
         demand_max = max(annual_h2_demand)
         demand_pad = (demand_max - demand_min) * 0.30
