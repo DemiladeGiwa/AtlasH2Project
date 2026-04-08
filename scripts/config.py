@@ -1,5 +1,5 @@
 """
-config.py — Atlas-H2 Digital Infrastructure Twin v6.2
+config.py -- Atlas-H2 Digital Infrastructure Twin v10.0
 Single source of truth for all physical, economic, and environmental constants.
 All modules import from here. Do not hard-code constants elsewhere.
 """
@@ -7,6 +7,45 @@ All modules import from here. Do not hard-code constants elsewhere.
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import List
+
+
+@dataclass(frozen=True)
+class RouteProfile:
+    """
+    All corridor-specific parameters for one rail route.
+    frozen=True makes it hashable for @st.cache_data keying.
+    Raise ValueError on construction if any parameter is physically invalid.
+    """
+    name: str                    # human-readable route label
+    corridor_km: float           # one-way route distance [km]
+    trip_energy_kwh: float       # traction energy per one-way trip [kWh]
+    winter_ambient_temp_c: float # design ambient temperature [C]
+    cabin_target_temp_c: float   # HVAC setpoint [C]; EN 13129
+    trips_per_year: int          # annual one-way trips
+
+    def __post_init__(self) -> None:
+        if self.corridor_km <= 0:
+            raise ValueError(f"corridor_km must be > 0, got {self.corridor_km}")
+        if self.trip_energy_kwh <= 0:
+            raise ValueError(f"trip_energy_kwh must be > 0, got {self.trip_energy_kwh}")
+        if self.trips_per_year <= 0:
+            raise ValueError(f"trips_per_year must be > 0, got {self.trips_per_year}")
+        if self.cabin_target_temp_c <= self.winter_ambient_temp_c:
+            raise ValueError(
+                f"cabin_target_temp_c ({self.cabin_target_temp_c}) must be > "
+                f"winter_ambient_temp_c ({self.winter_ambient_temp_c})"
+            )
+
+
+# default route used by all engines when no route is explicitly passed
+ROUTE_SJ_MONCTON: RouteProfile = RouteProfile(
+    name="Saint John to Moncton",
+    corridor_km=155.0,           # source: NB rail network map
+    trip_energy_kwh=4_000.0,     # traction energy at 155 km baseline
+    winter_ambient_temp_c=-10.0, # Environment Canada normals 1991-2020
+    cabin_target_temp_c=20.0,    # EN 13129
+    trips_per_year=730,          # 2 round trips/day x 365 days
+)
 
 
 @dataclass(frozen=True)
@@ -24,9 +63,7 @@ class TrainProfile:
 
 @dataclass(frozen=True)
 class AtlasConfig:
-    """
-    Immutable config singleton. Access via the module-level cfg instance.
-    """
+    """Immutable config singleton. Access via the module-level cfg instance."""
 
     # train profiles
     LEGACY_DIESEL: TrainProfile = TrainProfile(
@@ -75,15 +112,15 @@ class AtlasConfig:
         return [self.LEGACY_DIESEL, self.BATTERY_EV, self.BASELINE_LTPEM, self.INNOVATION_HTPEM]
 
     # economic constants
-    NB_POWER_INDUSTRIAL_RATE: float = 0.1023   # CAD/kWh; source: NB Power GRA 2025/26
-    FEDERAL_H2_ITC: float           = 0.40     # Canada Budget 2023 / Bill C-59
-    CLEAN_TECH_ITC: float           = 0.30     # cannot stack with H2 ITC
-    DIESEL_PRICE_LITER: float       = 1.75     # CAD/L NB average 2025/26; source: NRCan
-    ELECTROLYZER_CAPEX_PER_KW: float = 1_200.0 # CAD/kW installed; source: IRENA 2022 / BNEF 2024
-    ELECTROLYZER_OPEX_RATE: float   = 0.02     # fraction of gross CAPEX/yr; source: NREL H2A 2023
-    ELECTROLYZER_BOP_FRACTION: float = 0.25    # BOP share of total CAPEX; source: IRENA 2020
-    FC_PARASITIC_FRACTION: float    = 0.10     # parasitic load fraction of gross FC input
-    WACC: float                     = 0.08     # pre-positioned for v7.0 NPV-LCOH upgrade
+    NB_POWER_INDUSTRIAL_RATE: float  = 0.1023   # CAD/kWh; source: NB Power GRA 2025/26
+    FEDERAL_H2_ITC: float            = 0.40     # Canada Budget 2023 / Bill C-59
+    CLEAN_TECH_ITC: float            = 0.30     # cannot stack with H2 ITC
+    DIESEL_PRICE_LITER: float        = 1.75     # CAD/L NB average 2025/26; source: NRCan
+    ELECTROLYZER_CAPEX_PER_KW: float = 1_200.0  # CAD/kW installed; source: IRENA 2022 / BNEF 2024
+    ELECTROLYZER_OPEX_RATE: float    = 0.02     # fraction of gross CAPEX/yr; source: NREL H2A 2023
+    ELECTROLYZER_BOP_FRACTION: float = 0.25     # BOP share of total CAPEX; source: IRENA 2020
+    FC_PARASITIC_FRACTION: float     = 0.10     # parasitic load fraction of gross FC input
+    WACC: float                      = 0.08     # pre-positioned for NPV-LCOH upgrade
 
     # technical / physical constants
     H2_ENERGY_DENSITY_KWH_KG: float    = 33.3    # LHV; source: NIST / IEA 2023
@@ -97,26 +134,25 @@ class AtlasConfig:
     TRAIN_BASE_MASS_TONNES: float       = 114.3  # 3-car consist, empty
 
     # environmental constants
-    DIESEL_CO2_PER_LITER: float            = 2.68   # kg CO2/L TTW; source: Transport Canada 2024
-    DIESEL_CONSUMPTION_L_PER_KM: float     = 4.5    # L/km regional passenger; source: RAC 2019
-    DIESEL_NOX_G_PER_LITER: float          = 35.0   # g NOx/L; source: RAC LEM Report 2019
-    NB_GRID_CARBON_INTENSITY: float        = 0.22   # kg CO2/kWh; source: ECCC NIR 2023
+    DIESEL_CO2_PER_LITER: float             = 2.68   # kg CO2/L TTW; source: Transport Canada 2024
+    DIESEL_CONSUMPTION_L_PER_KM: float      = 4.5    # L/km regional passenger; source: RAC 2019
+    DIESEL_NOX_G_PER_LITER: float           = 35.0   # g NOx/L; source: RAC LEM Report 2019
+    NB_GRID_CARBON_INTENSITY: float         = 0.22   # kg CO2/kWh; source: ECCC NIR 2023
     SOCIAL_COST_CARBON_CAD_PER_TONNE: float = 210.0  # CAD/tonne CO2e; source: ECCC 2023
-
-    # corridor parameters
-    CORRIDOR_DISTANCE_KM: float = 155.0    # Saint John to Moncton [km]
-    TRIP_ENERGY_KWH: float      = 4_000.0  # traction energy per one-way trip [kWh]
-    WINTER_AMBIENT_TEMP_C: float = -10.0   # NB design ambient; Environment Canada normals 1991-2020
-    CABIN_TARGET_TEMP_C: float  = 20.0     # HVAC setpoint; EN 13129
-    TRIPS_PER_YEAR: int         = 730      # 2 round trips/day x 365 days
 
 
 cfg = AtlasConfig()
 
 if __name__ == "__main__":
     print("=" * 68)
-    print("  ATLAS-H2 CONFIG — Source of Truth Verification")
+    print("  ATLAS-H2 CONFIG -- Source of Truth Verification")
     print("=" * 68)
+    print(f"\n  DEFAULT ROUTE: {ROUTE_SJ_MONCTON.name}")
+    print(f"    corridor_km          : {ROUTE_SJ_MONCTON.corridor_km} km")
+    print(f"    trip_energy_kwh      : {ROUTE_SJ_MONCTON.trip_energy_kwh:,.0f} kWh")
+    print(f"    winter_ambient_temp  : {ROUTE_SJ_MONCTON.winter_ambient_temp_c} C")
+    print(f"    cabin_target_temp    : {ROUTE_SJ_MONCTON.cabin_target_temp_c} C")
+    print(f"    trips_per_year       : {ROUTE_SJ_MONCTON.trips_per_year}")
     print("\n  TRAIN PROFILES:\n")
     for p in cfg.ALL_PROFILES:
         print(f"  [{p.name}]")

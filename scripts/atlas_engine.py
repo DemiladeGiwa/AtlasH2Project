@@ -1,5 +1,5 @@
 """
-atlas_engine.py — Atlas-H2 Digital Infrastructure Twin v6.2
+atlas_engine.py -- Atlas-H2 Digital Infrastructure Twin v10.0
 Core computation: payload, economics, thermal, and sensitivity analysis.
 """
 
@@ -8,26 +8,33 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from config import cfg, TrainProfile
+from config import cfg, TrainProfile, RouteProfile, ROUTE_SJ_MONCTON
 
-# baseline route constants derived from config.py
-_BASE_KM: float   = cfg.CORRIDOR_DISTANCE_KM   # 155 km
-_BASE_KWH: float  = cfg.TRIP_ENERGY_KWH         # 4000 kWh
-_BASE_HR: float   = 1.75                         # 1.75 hr at ~88.6 km/h
-_AVG_SPEED: float = _BASE_KM / _BASE_HR          # 88.57 km/h
+# module-level speed constant derived from default route
+_BASE_KM: float   = ROUTE_SJ_MONCTON.corridor_km    # 155 km
+_BASE_KWH: float  = ROUTE_SJ_MONCTON.trip_energy_kwh # 4000 kWh
+_BASE_HR: float   = 1.75                              # 1.75 hr at ~88.6 km/h
+_AVG_SPEED: float = _BASE_KM / _BASE_HR               # 88.57 km/h
 
 FC_DEGRADATION_RATE: float = 0.015  # 1.5%/yr relative efficiency loss
 
 
 def apply_degradation(base_efficiency: float, age_years: int) -> float:
-    """FC efficiency after age_years. Floored at 50% of initial to prevent unphysical values."""
+    """
+    FC efficiency after age_years. Floored at 50% of initial.
+    Raises ValueError if base_efficiency is outside (0, 1].
+    """
+    if not 0.0 < base_efficiency <= 1.0:
+        raise ValueError(f"base_efficiency must be in (0, 1], got {base_efficiency}")
+    if age_years < 0:
+        raise ValueError(f"age_years cannot be negative, got {age_years}")
     degraded = base_efficiency * (1.0 - FC_DEGRADATION_RATE * age_years)
     return max(degraded, base_efficiency * 0.50)
 
 
-def corridor_trip_energy_kwh(corridor_km: float) -> float:
-    """Trip energy [kWh] scaled linearly from baseline corridor."""
-    return corridor_km * (_BASE_KWH / _BASE_KM)
+def corridor_trip_energy_kwh(corridor_km: float, route: RouteProfile = ROUTE_SJ_MONCTON) -> float:
+    """Trip energy [kWh] scaled linearly from the route baseline."""
+    return corridor_km * (route.trip_energy_kwh / route.corridor_km)
 
 
 def corridor_trip_duration_hr(corridor_km: float) -> float:
@@ -91,8 +98,13 @@ class HeatRecoveryResult:
 class PayloadAnalyzer:
     """Calculates onboard energy storage mass for all four propulsion profiles."""
 
-    def __init__(self, li_ion_density: float = cfg.BATTERY_SYSTEM_DENSITY_WH_KG) -> None:
+    def __init__(
+        self,
+        li_ion_density: float = cfg.BATTERY_SYSTEM_DENSITY_WH_KG,
+        route: RouteProfile = ROUTE_SJ_MONCTON,
+    ) -> None:
         self.li_ion_density = li_ion_density
+        self.route = route
 
     @staticmethod
     def _mass_for_energy(energy_kwh: float, density_wh_kg: float) -> float:
@@ -107,8 +119,8 @@ class PayloadAnalyzer:
         corridor_km: Optional[float] = None,
         profile: Optional[TrainProfile] = None,
     ) -> PayloadAnalysisResult:
-        ckm     = corridor_km if corridor_km is not None else _BASE_KM
-        ekwh    = energy_kwh  if energy_kwh  is not None else corridor_trip_energy_kwh(ckm)
+        ckm     = corridor_km if corridor_km is not None else self.route.corridor_km
+        ekwh    = energy_kwh  if energy_kwh  is not None else corridor_trip_energy_kwh(ckm, self.route)
         profile = profile     if profile     is not None else cfg.INNOVATION_HTPEM
 
         storage_mass = (
@@ -158,7 +170,7 @@ class PayloadAnalyzer:
 
 
 class EconomicsEngine:
-    """Calculates LCOH for green H2 from an on-site PEM electrolyzer in NB."""
+    """Calculates LCOH for green H2 from an on-site PEM electrolyzer."""
 
     ANALYSIS_PERIOD_YEARS: int   = 10
     ELEC_DEGRADATION_RATE: float = 0.010  # 1.0%/yr electrolyzer H2 yield drop
@@ -172,6 +184,19 @@ class EconomicsEngine:
         opex_rate: float = cfg.ELECTROLYZER_OPEX_RATE,
         capacity_factor: float = 0.80,
     ) -> None:
+        if electrolyzer_size_kw <= 0:
+            raise ValueError(f"electrolyzer_size_kw must be > 0, got {electrolyzer_size_kw}")
+        if capex_per_kw < 0:
+            raise ValueError(f"capex_per_kw cannot be negative, got {capex_per_kw}")
+        if not 0.0 < capacity_factor <= 1.0:
+            raise ValueError(f"capacity_factor must be in (0, 1], got {capacity_factor}")
+        if electricity_rate < 0:
+            raise ValueError(f"electricity_rate cannot be negative, got {electricity_rate}")
+        if not 0.0 <= itc_rate <= 1.0:
+            raise ValueError(f"itc_rate must be in [0, 1], got {itc_rate}")
+        if not 0.0 <= opex_rate <= 1.0:
+            raise ValueError(f"opex_rate must be in [0, 1], got {opex_rate}")
+
         self.electrolyzer_size_kw = electrolyzer_size_kw
         self.electricity_rate     = electricity_rate
         self.capex_per_kw         = capex_per_kw
@@ -191,6 +216,13 @@ class EconomicsEngine:
         capex_kw = dynamic_capex_per_kw     if dynamic_capex_per_kw     is not None else self.capex_per_kw
         cf       = dynamic_capacity_factor  if dynamic_capacity_factor  is not None else self.capacity_factor
         profile  = profile                  if profile                  is not None else cfg.INNOVATION_HTPEM
+
+        if rate < 0:
+            raise ValueError(f"electricity_rate cannot be negative, got {rate}")
+        if capex_kw < 0:
+            raise ValueError(f"capex_per_kw cannot be negative, got {capex_kw}")
+        if not 0.0 < cf <= 1.0:
+            raise ValueError(f"capacity_factor must be in (0, 1], got {cf}")
 
         base_h2_yield      = 0.70
         effective_h2_yield = max(
@@ -256,27 +288,34 @@ class ThermalEfficiencyModule:
     # min stack temp for waste-heat cabin heating
     HTPEM_THRESHOLD_C: float = 100.0
 
-    # UA coefficient from config: 50 kW HVAC / 30C design delta = 1.6667 kW/C
-    BUILDING_HEAT_LOSS_COEFF: float = (
-        cfg.BASELINE_LTPEM.hvac_power_draw_kw
-        / (cfg.CABIN_TARGET_TEMP_C - cfg.WINTER_AMBIENT_TEMP_C)
-    )
-
     def __init__(
         self,
         fc_power_kw: float = cfg.TRAIN_POWER_KW,
         fc_efficiency: float = cfg.FC_SYSTEM_EFFICIENCY,
-        ambient_temp_c: float = cfg.WINTER_AMBIENT_TEMP_C,
-        target_cabin_temp_c: float = cfg.CABIN_TARGET_TEMP_C,
-        trips_per_year: int = cfg.TRIPS_PER_YEAR,
-        corridor_km: float = _BASE_KM,
+        trips_per_year: int = ROUTE_SJ_MONCTON.trips_per_year,
+        corridor_km: float = ROUTE_SJ_MONCTON.corridor_km,
+        route: RouteProfile = ROUTE_SJ_MONCTON,
     ) -> None:
-        self.fc_power_kw         = fc_power_kw
-        self.fc_efficiency       = fc_efficiency
-        self.ambient_temp_c      = ambient_temp_c
-        self.target_cabin_temp_c = target_cabin_temp_c
-        self.trips_per_year      = trips_per_year
-        self.corridor_km         = corridor_km
+        if fc_power_kw <= 0:
+            raise ValueError(f"fc_power_kw must be > 0, got {fc_power_kw}")
+        if not 0.0 < fc_efficiency <= 1.0:
+            raise ValueError(f"fc_efficiency must be in (0, 1], got {fc_efficiency}")
+        if trips_per_year <= 0:
+            raise ValueError(f"trips_per_year must be > 0, got {trips_per_year}")
+
+        self.fc_power_kw    = fc_power_kw
+        self.fc_efficiency  = fc_efficiency
+        self.trips_per_year = trips_per_year
+        self.corridor_km    = corridor_km
+        self.route          = route
+
+        # UA coefficient: 50 kW HVAC / design delta T from the route
+        delta_t_design = route.cabin_target_temp_c - route.winter_ambient_temp_c
+        self.building_heat_loss_coeff: float = (
+            cfg.BASELINE_LTPEM.hvac_power_draw_kw / delta_t_design
+        )
+        self.ambient_temp_c      = route.winter_ambient_temp_c
+        self.target_cabin_temp_c = route.cabin_target_temp_c
 
     def _waste_heat_output_kw(self, efficiency: float) -> float:
         """
@@ -291,7 +330,7 @@ class ThermalEfficiencyModule:
 
     def _cabin_demand_kw(self, ambient_temp: float) -> float:
         """Cabin heating demand [kW] via UA*dT. Returns 0 if ambient >= setpoint."""
-        return max(0.0, self.BUILDING_HEAT_LOSS_COEFF * (self.target_cabin_temp_c - ambient_temp))
+        return max(0.0, self.building_heat_loss_coeff * (self.target_cabin_temp_c - ambient_temp))
 
     def calculate_heat_recovery(
         self,
@@ -417,6 +456,11 @@ class SensitivityEngine:
         capex_steps: int = 16,
         system_age_years: int = 0,
     ) -> tuple[list[float], list[float], list[list[float]]]:
+        if electrolyzer_size_kw <= 0:
+            raise ValueError(f"electrolyzer_size_kw must be > 0, got {electrolyzer_size_kw}")
+        if not 0.0 < capacity_factor <= 1.0:
+            raise ValueError(f"capacity_factor must be in (0, 1], got {capacity_factor}")
+
         step_r = (rate_max  - rate_min)  / max(rate_steps  - 1, 1)
         step_c = (capex_max - capex_min) / max(capex_steps - 1, 1)
 
@@ -429,10 +473,10 @@ class SensitivityEngine:
         )
 
         # hoist loop-invariant terms
-        annual_hours     = 8_760.0 * capacity_factor
-        annual_elec_base = electrolyzer_size_kw * annual_hours
-        annual_h2_kg     = (annual_elec_base * effective_yield) / cfg.H2_ENERGY_DENSITY_KWH_KG
-        total_h2         = annual_h2_kg * self.ANALYSIS_PERIOD_YEARS
+        annual_hours      = 8_760.0 * capacity_factor
+        annual_elec_base  = electrolyzer_size_kw * annual_hours
+        annual_h2_kg      = (annual_elec_base * effective_yield) / cfg.H2_ENERGY_DENSITY_KWH_KG
+        total_h2          = annual_h2_kg * self.ANALYSIS_PERIOD_YEARS
         bop_discount_rate = cfg.ELECTROLYZER_BOP_FRACTION * profile.capex_purification_discount_pct
 
         z_grid: list[list[float]] = []

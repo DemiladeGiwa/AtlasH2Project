@@ -1,6 +1,6 @@
 """
-carbon_abatement.py — Atlas-H2 Carbon Abatement Calculator v2.2
-CO2 and NOx abatement from switching SJ-Moncton corridor from diesel to H2.
+carbon_abatement.py -- Atlas-H2 Carbon Abatement Calculator v10.0
+CO2 and NOx abatement from switching a rail corridor from diesel to H2.
 """
 
 from __future__ import annotations
@@ -8,16 +8,33 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional
 
-from config import cfg
+from config import cfg, RouteProfile, ROUTE_SJ_MONCTON
 
-# Federal carbon price schedule CAD/tonne
-CARBON_PRICE_SCHEDULE: dict[int, float] = {
+# Known federal carbon price schedule CAD/tonne
+_CARBON_PRICE_SCHEDULE: dict[int, float] = {
     2026: 110.0,
     2027: 125.0,
     2028: 140.0,
     2029: 155.0,
     2030: 170.0,
 }
+
+_SCHEDULE_LAST_YEAR: int   = 2030
+_SCHEDULE_LAST_PRICE: float = 170.0
+_ANNUAL_PRICE_INCREASE: float = 15.0  # CAD/tonne/yr extrapolated beyond 2030
+
+
+def get_carbon_price(year: int) -> float:
+    """
+    Returns carbon price [CAD/tonne] for the given year.
+    Uses the schedule for 2026-2030; extrapolates at +C$15/yr for 2031+.
+    """
+    if year in _CARBON_PRICE_SCHEDULE:
+        return _CARBON_PRICE_SCHEDULE[year]
+    if year > _SCHEDULE_LAST_YEAR:
+        return _SCHEDULE_LAST_PRICE + (year - _SCHEDULE_LAST_YEAR) * _ANNUAL_PRICE_INCREASE
+    # years before schedule: return the earliest known price
+    return _CARBON_PRICE_SCHEDULE[min(_CARBON_PRICE_SCHEDULE)]
 
 
 @dataclass
@@ -48,32 +65,42 @@ class LifetimeAbatementResult:
 
 class CarbonAbatementCalculator:
     """
-    Computes CO2 and NOx abatement for the SJ-Moncton corridor.
+    Computes CO2 and NOx abatement for a rail corridor switching from diesel to H2.
 
+    route: RouteProfile providing corridor_km, trips_per_year, etc.
     annual_h2_cost_cad: total annualised H2 system cost [CAD/yr].
-    Pass (net_capex / analysis_period) + annual_opex + annual_elec from the dashboard
-    so LCOA reacts to slider changes.
+      Pass (net_capex / analysis_period) + annual_opex + annual_elec from the
+      dashboard so LCOA reacts to slider changes.
     """
 
     def __init__(
         self,
-        corridor_km: float = cfg.CORRIDOR_DISTANCE_KM,
-        trips_per_year: int = cfg.TRIPS_PER_YEAR,
+        route: RouteProfile = ROUTE_SJ_MONCTON,
         diesel_l_per_km: float = cfg.DIESEL_CONSUMPTION_L_PER_KM,
         h2_co2_kg_per_km: float = 0.012,
         annual_h2_cost_cad: float = 1_200_000.0,
+        # allow per-call overrides so dashboard can pass slider values directly
+        corridor_km: Optional[float] = None,
+        trips_per_year: Optional[int] = None,
     ) -> None:
-        self.corridor_km        = corridor_km
-        self.trips_per_year     = trips_per_year
+        self.corridor_km        = corridor_km    if corridor_km    is not None else route.corridor_km
+        self.trips_per_year     = trips_per_year if trips_per_year is not None else route.trips_per_year
         self.diesel_l_per_km    = diesel_l_per_km
         self.h2_co2_kg_per_km   = h2_co2_kg_per_km
         self.annual_h2_cost_cad = annual_h2_cost_cad
+
+        if self.corridor_km <= 0:
+            raise ValueError(f"corridor_km must be > 0, got {self.corridor_km}")
+        if self.trips_per_year <= 0:
+            raise ValueError(f"trips_per_year must be > 0, got {self.trips_per_year}")
+        if self.annual_h2_cost_cad < 0:
+            raise ValueError(f"annual_h2_cost_cad cannot be negative, got {self.annual_h2_cost_cad}")
 
     def _annual_diesel_fuel_l(self) -> float:
         return self.diesel_l_per_km * self.corridor_km * self.trips_per_year
 
     def _annual_diesel_co2_tonnes(self) -> float:
-        # CO2 from config.py DIESEL_CO2_PER_LITER constant
+        # CO2 from cfg.DIESEL_CO2_PER_LITER constant
         return (self._annual_diesel_fuel_l() * cfg.DIESEL_CO2_PER_LITER) / 1_000.0
 
     def _annual_h2_co2_tonnes(self) -> float:
@@ -86,7 +113,7 @@ class CarbonAbatementCalculator:
     ) -> AnnualAbatementResult:
         """Abatement metrics for a single calendar year."""
         diesel_price = dynamic_diesel_price if dynamic_diesel_price is not None else cfg.DIESEL_PRICE_LITER
-        carbon_price = CARBON_PRICE_SCHEDULE.get(year, 170.0)
+        carbon_price = get_carbon_price(year)
         diesel_co2   = self._annual_diesel_co2_tonnes()
         h2_co2       = self._annual_h2_co2_tonnes()
         co2_abated   = diesel_co2 - h2_co2
@@ -123,9 +150,12 @@ class CarbonAbatementCalculator:
         total_fuel    = sum(r.avoided_fuel_cost_cad   for r in results)
 
         # LCOA = (total H2 cost - avoided diesel savings) / CO2 abated
-        # negative result means H2 is cheaper to operate than diesel
-        net_h2_cost = (self.annual_h2_cost_cad * n_years) - total_fuel
-        lcoa = net_h2_cost / total_co2 if total_co2 > 0 else 0.0
+        # negative means H2 is cheaper to operate than diesel
+        if total_co2 <= 0.0:
+            lcoa = 0.0
+        else:
+            net_h2_cost = (self.annual_h2_cost_cad * n_years) - total_fuel
+            lcoa = net_h2_cost / total_co2
 
         # EPA car benchmark 4.6 t CO2/yr; round() prevents 0 on short corridors
         cars_per_year = round(total_co2 / (4.6 * n_years))

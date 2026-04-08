@@ -1,4 +1,4 @@
-"""dashboard.py -- Atlas-H2 Digital Infrastructure Twin v9.2
+"""dashboard.py -- Atlas-H2 Digital Infrastructure Twin v10.0
 Streamlit dashboard for the 4-way rail propulsion comparison.
 
 Run with:
@@ -16,7 +16,7 @@ import plotly.graph_objects as go
 import pandas as pd
 from typing import Dict
 
-from config import cfg, TrainProfile
+from config import cfg, TrainProfile, RouteProfile, ROUTE_SJ_MONCTON
 from atlas_engine import (
     PayloadAnalyzer, PayloadAnalysisResult,
     EconomicsEngine, LCOHResult,
@@ -106,20 +106,33 @@ C_DIESEL = BRAND_COLORS["diesel"]     # "#64748B" slate
 # GLOBAL CSS
 st.markdown(f"""
 <style>
-/* ROOT & BASE */
+/* ---- design tokens ---- */
 :root {{
-  --text-scale-factor: 1.2;
+  --ease-std:      cubic-bezier(0.2, 0, 0, 1);
+  --ease-spring:   cubic-bezier(0.05, 0.7, 0.1, 1);
+  --ease-out:      cubic-bezier(0, 0, 0.2, 1);
+  --ease-in:       cubic-bezier(0.4, 0, 1, 1);
+  --dur-fast:      120ms;
+  --dur-mid:       220ms;
+  --dur-slow:      380ms;
+  --dur-enter:     480ms;
+  --radius-sm:     8px;
+  --radius-md:     12px;
+  --radius-lg:     16px;
+  --shadow-low:    0 1px 3px rgba(0,0,0,.18), 0 2px 8px rgba(0,0,0,.12);
+  --shadow-mid:    0 4px 16px rgba(0,0,0,.22), 0 8px 32px rgba(0,0,0,.14);
+  --shadow-high:   0 8px 28px rgba(0,0,0,.28), 0 16px 56px rgba(0,0,0,.18);
 }}
-@media (max-width: 768px), (max-resolution: 1.25dppx) {{
-  :root {{
-    --text-scale-factor: 1.35;
-  }}
+@media (max-width: 768px) {{
+  :root {{ --dur-enter: 320ms; }}
 }}
 
+/* ---- base ---- */
 header[data-testid="stHeader"] {{
     background-color: {C_BG};
     border-bottom: 1px solid {C_BORDER};
-    backdrop-filter: blur(8px);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
 }}
 [data-testid="stToolbar"] {{ background-color: {C_BG}; }}
 .stApp {{ background-color: {C_BG}; }}
@@ -130,56 +143,60 @@ header[data-testid="stHeader"] {{
     max-width: 100%;
 }}
 html, body, [class*="css"] {{
-    font-family: "Inter", system-ui, -apple-system, sans-serif;
+    font-family: "Inter", "Google Sans", system-ui, -apple-system, sans-serif;
     color: {C_TEXT};
     line-height: 1.65;
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
 }}
 h1, h2, h3 {{
     color: {C_TEXT};
-    letter-spacing: -0.01em;
+    letter-spacing: -0.015em;
     font-weight: 700;
     word-break: break-word;
-    white-space: normal;
 }}
 h1 {{ font-size: 1.5rem; line-height: 1.3; }}
 h2 {{ font-size: 1.05rem; }}
 h3 {{ font-size: 0.95rem; letter-spacing: 0.01em; }}
 
-/* KEYFRAMES */
+/* ---- keyframes ---- */
 @keyframes fadeInUp {{
-    from {{ opacity: 0; transform: translateY(16px); }}
-    to   {{ opacity: 1; transform: translateY(0); }}
+    from {{ opacity: 0; transform: translateY(20px) scale(0.98); }}
+    to   {{ opacity: 1; transform: translateY(0)    scale(1); }}
 }}
 @keyframes fadeIn {{
     from {{ opacity: 0; }}
     to   {{ opacity: 1; }}
 }}
 @keyframes slideInLeft {{
-    from {{ opacity: 0; transform: translateX(-18px); }}
+    from {{ opacity: 0; transform: translateX(-24px); }}
     to   {{ opacity: 1; transform: translateX(0); }}
 }}
 @keyframes slideInRight {{
-    from {{ opacity: 0; transform: translateX(18px); }}
+    from {{ opacity: 0; transform: translateX(24px); }}
     to   {{ opacity: 1; transform: translateX(0); }}
 }}
 @keyframes scaleIn {{
-    from {{ opacity: 0; transform: scale(0.97); }}
+    from {{ opacity: 0; transform: scale(0.94); }}
     to   {{ opacity: 1; transform: scale(1); }}
 }}
+@keyframes floatIn {{
+    from {{ opacity: 0; transform: translateY(10px); }}
+    to   {{ opacity: 1; transform: translateY(0); }}
+}}
 @keyframes pulse {{
-    0%   {{ box-shadow: 0 0 0 0   {C_GREEN}99; }}
-    70%  {{ box-shadow: 0 0 0 8px {C_GREEN}00; }}
+    0%   {{ box-shadow: 0 0 0 0   {C_GREEN}88; }}
+    65%  {{ box-shadow: 0 0 0 7px {C_GREEN}00; }}
     100% {{ box-shadow: 0 0 0 0   {C_GREEN}00; }}
 }}
 @keyframes accentPulse {{
-    0%   {{ box-shadow: 0 0 0 0    {C_ACCENT}55; }}
-    70%  {{ box-shadow: 0 0 0 10px {C_ACCENT}00; }}
+    0%   {{ box-shadow: 0 0 0 0    {C_ACCENT}44; }}
+    65%  {{ box-shadow: 0 0 0 8px  {C_ACCENT}00; }}
     100% {{ box-shadow: 0 0 0 0    {C_ACCENT}00; }}
 }}
 @keyframes borderGlow {{
     0%, 100% {{ border-color: {C_BORDER};    box-shadow: none; }}
-    50%       {{ border-color: {C_ACCENT}66; box-shadow: 0 0 10px {C_ACCENT}1a; }}
+    50%       {{ border-color: {C_ACCENT}55; box-shadow: 0 0 12px {C_ACCENT}18; }}
 }}
 @keyframes gradientShift {{
     0%   {{ background-position: 0%   50%; }}
@@ -190,50 +207,90 @@ h3 {{ font-size: 0.95rem; letter-spacing: 0.01em; }}
     0%   {{ background-position: -200% center; }}
     100% {{ background-position:  200% center; }}
 }}
+@keyframes tabIndicator {{
+    from {{ transform: scaleX(0); opacity: 0; }}
+    to   {{ transform: scaleX(1); opacity: 1; }}
+}}
 
-/* ENTRANCE ANIMATIONS */
-.kpi-card              {{ animation: fadeInUp 0.44s cubic-bezier(0.22, 1, 0.36, 1) both; }}
-.kpi-card:nth-child(1) {{ animation-delay: 0.04s; }}
-.kpi-card:nth-child(2) {{ animation-delay: 0.10s; }}
-.kpi-card:nth-child(3) {{ animation-delay: 0.16s; }}
-.kpi-card:nth-child(4) {{ animation-delay: 0.22s; }}
-.kpi-card:nth-child(5) {{ animation-delay: 0.28s; }}
+/* ---- staggered entrance sequences ---- */
+.kpi-card {{ animation: fadeInUp var(--dur-enter) var(--ease-spring) both; }}
+.kpi-card:nth-child(1) {{ animation-delay: 0ms;   }}
+.kpi-card:nth-child(2) {{ animation-delay: 55ms;  }}
+.kpi-card:nth-child(3) {{ animation-delay: 110ms; }}
+.kpi-card:nth-child(4) {{ animation-delay: 165ms; }}
+.kpi-card:nth-child(5) {{ animation-delay: 220ms; }}
 
 [data-baseweb="tab-panel"] > div {{
-    animation: fadeInUp 0.36s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: fadeInUp 340ms var(--ease-spring) both;
 }}
 [data-testid="stPlotlyChart"] {{
-    animation: slideInLeft 0.44s cubic-bezier(0.22, 1, 0.36, 1) both;
-    border-radius: 12px;
+    animation: slideInLeft 420ms var(--ease-spring) both;
+    border-radius: var(--radius-md);
     overflow: hidden;
-}}
-[data-testid="stPlotlyChart"] iframe {{
-    animation: scaleIn 0.50s cubic-bezier(0.22, 1, 0.36, 1) both;
 }}
 [data-testid="stVerticalBlock"] > div:last-child [data-testid="stMetric"],
 [data-testid="stVerticalBlock"] > div:last-child [data-testid="stDataFrame"] {{
-    animation: slideInRight 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: slideInRight 400ms var(--ease-spring) both;
 }}
 [data-testid="stDataFrame"] {{
-    animation: fadeInUp 0.40s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: fadeInUp 360ms var(--ease-spring) both;
 }}
 [data-testid="stMarkdownContainer"] h2,
 [data-testid="stMarkdownContainer"] h3 {{
-    animation: fadeIn 0.38s ease both;
+    animation: fadeIn 280ms var(--ease-out) both;
+}}
+
+/* ---- tabs ---- */
+.stTabs [data-baseweb="tab-list"] {{
+    background: {C_SURFACE};
+    border-radius: 10px 10px 0 0;
+    border-bottom: 1px solid {C_BORDER};
+    gap: 2px;
+    padding: 5px 8px 0;
+}}
+.stTabs [data-baseweb="tab"] {{
+    background: transparent;
+    border-radius: 7px 7px 0 0;
+    color: {C_MUTED};
+    padding: 9px 18px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    letter-spacing: 0.015em;
+    border: 1px solid transparent;
+    transition:
+        color      var(--dur-mid) var(--ease-std),
+        background var(--dur-mid) var(--ease-std),
+        transform  var(--dur-fast) var(--ease-out);
+}}
+.stTabs [data-baseweb="tab"]:hover {{
+    color: {C_TEXT};
+    background: {C_ACCENT2}28;
+    transform: translateY(-1px);
 }}
 .stTabs [aria-selected="true"] {{
     background: {C_BG} !important;
     color: {C_HTPEM} !important;
     font-weight: 700;
     border-color: {C_BORDER} {C_BORDER} {C_BG} !important;
-    animation: accentPulse 1.1s ease 1;
+    animation: accentPulse 0.9s var(--ease-out) 1;
+    position: relative;
 }}
-.legend-pill:nth-child(1) {{ animation-delay: 0.04s; }}
-.legend-pill:nth-child(2) {{ animation-delay: 0.09s; }}
-.legend-pill:nth-child(3) {{ animation-delay: 0.14s; }}
-.legend-pill:nth-child(4) {{ animation-delay: 0.19s; }}
+.stTabs [aria-selected="true"]::after {{
+    content: "";
+    position: absolute;
+    bottom: -1px; left: 10%; right: 10%;
+    height: 2px;
+    background: {C_HTPEM};
+    border-radius: 2px 2px 0 0;
+    animation: tabIndicator 280ms var(--ease-spring) both;
+    transform-origin: center;
+}}
+.legend-pill:nth-child(1) {{ animation-delay: 40ms;  }}
+.legend-pill:nth-child(2) {{ animation-delay: 80ms;  }}
+.legend-pill:nth-child(3) {{ animation-delay: 120ms; }}
+.legend-pill:nth-child(4) {{ animation-delay: 160ms; }}
 
-/* KPI ROW */
+/* ---- KPI row ---- */
 .kpi-row {{
     display: flex;
     gap: 12px;
@@ -252,25 +309,25 @@ h3 {{ font-size: 0.95rem; letter-spacing: 0.01em; }}
     background: {C_SURFACE};
     border: 1px solid {C_BORDER};
     border-top: 2px solid transparent;
-    border-radius: 12px;
+    border-radius: var(--radius-md);
     padding: 20px 18px 15px;
-    transition:
-        border-color     0.30s cubic-bezier(0.22, 1, 0.36, 1),
-        border-top-color 0.30s cubic-bezier(0.22, 1, 0.36, 1),
-        box-shadow       0.30s cubic-bezier(0.22, 1, 0.36, 1),
-        transform        0.30s cubic-bezier(0.22, 1, 0.36, 1);
     cursor: default;
     position: relative;
     overflow: hidden;
-    will-change: transform;
+    will-change: transform, box-shadow;
+    transition:
+        border-color     var(--dur-slow) var(--ease-std),
+        border-top-color var(--dur-slow) var(--ease-std),
+        box-shadow       var(--dur-slow) var(--ease-std),
+        transform        var(--dur-slow) var(--ease-spring);
 }}
 .kpi-card::before {{
     content: "";
     position: absolute;
     inset: 0;
-    background: linear-gradient(140deg, {C_HTPEM}08 0%, transparent 55%);
+    background: linear-gradient(135deg, {C_HTPEM}0a 0%, transparent 60%);
     opacity: 0;
-    transition: opacity 0.30s ease;
+    transition: opacity var(--dur-slow) var(--ease-std);
     pointer-events: none;
 }}
 .kpi-card::after {{
@@ -278,32 +335,27 @@ h3 {{ font-size: 0.95rem; letter-spacing: 0.01em; }}
     position: absolute;
     bottom: 0; left: 0; right: 0;
     height: 1px;
-    background: linear-gradient(90deg, transparent, {C_HTPEM}33, transparent);
+    background: linear-gradient(90deg, transparent 0%, {C_HTPEM}44 50%, transparent 100%);
     opacity: 0;
-    transition: opacity 0.30s ease;
+    transition: opacity var(--dur-slow) var(--ease-std);
 }}
 .kpi-card:hover {{
-    border-color: {C_HTPEM}66;
     border-top-color: {C_HTPEM};
-    box-shadow:
-        0 4px 20px {C_HTPEM}18,
-        0 12px 40px rgba(0,0,0,0.25),
-        inset 0 1px 0 {C_HTPEM}18;
-    transform: translateY(-4px);
+    border-color: {C_HTPEM}55;
+    box-shadow: var(--shadow-mid), inset 0 1px 0 {C_HTPEM}14;
+    transform: translateY(-5px) scale(1.01);
 }}
 .kpi-card:hover::before {{ opacity: 1; }}
 .kpi-card:hover::after  {{ opacity: 1; }}
 
 .kpi-label {{
-    font-size: 0.65rem;
+    font-size: 0.64rem;
     font-weight: 700;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.11em;
     text-transform: uppercase;
     color: {C_MUTED};
     margin-bottom: 8px;
-    white-space: normal;
-    word-break: break-word;
-    line-height: 1.2;
+    line-height: 1.25;
 }}
 .kpi-value {{
     font-size: 1.25rem;
@@ -311,20 +363,15 @@ h3 {{ font-size: 0.95rem; letter-spacing: 0.01em; }}
     color: {C_TEXT};
     letter-spacing: -0.025em;
     margin-bottom: 6px;
-    white-space: normal;
-    word-break: break-word;
     font-variant-numeric: tabular-nums;
     line-height: 1.2;
 }}
 .kpi-delta {{
-    font-size: 0.75rem;
+    font-size: 0.74rem;
     font-weight: 500;
-    white-space: normal;
-    word-break: break-word;
     display: flex;
     align-items: center;
     gap: 3px;
-    opacity: 0.9;
     line-height: 1.3;
 }}
 .kpi-delta.pos  {{ color: {C_GREEN};  }}
@@ -332,34 +379,32 @@ h3 {{ font-size: 0.95rem; letter-spacing: 0.01em; }}
 .kpi-delta.neu  {{ color: {C_MUTED};  }}
 .kpi-delta.warn {{ color: {C_ORANGE}; }}
 
-
+/* ---- st.metric ---- */
 [data-testid="stMetric"] {{
     background: {C_SURFACE};
     border: 1px solid {C_BORDER};
-    border-radius: 12px;
+    border-radius: var(--radius-md);
     padding: 20px 18px;
+    will-change: transform, box-shadow;
+    animation: fadeInUp 400ms var(--ease-spring) both;
     transition:
-        border-color 0.28s cubic-bezier(0.22, 1, 0.36, 1),
-        box-shadow   0.28s cubic-bezier(0.22, 1, 0.36, 1),
-        transform    0.28s cubic-bezier(0.22, 1, 0.36, 1);
-    animation: fadeInUp 0.40s cubic-bezier(0.22, 1, 0.36, 1) both;
+        border-color var(--dur-mid) var(--ease-std),
+        box-shadow   var(--dur-mid) var(--ease-std),
+        transform    var(--dur-mid) var(--ease-spring);
 }}
 [data-testid="stMetric"]:hover {{
-    border-color: {C_HTPEM}55;
-    box-shadow: 0 4px 20px {C_HTPEM}14, 0 8px 32px rgba(0,0,0,0.2);
-    transform: translateY(-2px);
+    border-color: {C_HTPEM}44;
+    box-shadow: var(--shadow-mid);
+    transform: translateY(-3px);
 }}
-/* metric label size */
 [data-testid="stMetricLabel"] {{
     color: {C_MUTED};
     font-size: 1.1rem !important;
     letter-spacing: 0.02em;
     text-transform: uppercase;
     font-weight: 700;
-    word-break: break-word;
     line-height: 1.3;
 }}
-/* metric value size */
 [data-testid="stMetricValue"] {{
     color: {C_TEXT};
     font-weight: 600 !important;
@@ -367,46 +412,14 @@ h3 {{ font-size: 0.95rem; letter-spacing: 0.01em; }}
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.03em;
     line-height: 1.2;
-    word-break: break-word;
-    white-space: normal;
 }}
 [data-testid="stMetricDelta"] {{
     font-size: 0.85rem;
     font-weight: 500;
     line-height: 1.3;
-    word-break: break-word;
-    white-space: normal;
 }}
 
-/* TABS */
-.stTabs [data-baseweb="tab-list"] {{
-    background: {C_SURFACE};
-    border-radius: 10px 10px 0 0;
-    border-bottom: 1px solid {C_BORDER};
-    gap: 2px;
-    padding: 5px 8px 0;
-}}
-.stTabs [data-baseweb="tab"] {{
-    background: transparent;
-    border-radius: 7px 7px 0 0;
-    color: {C_MUTED};
-    padding: 9px 18px;
-    font-size: 0.78rem;
-    font-weight: 500;
-    transition:
-        color      0.20s cubic-bezier(0.22, 1, 0.36, 1),
-        background 0.20s cubic-bezier(0.22, 1, 0.36, 1);
-    letter-spacing: 0.015em;
-    border: 1px solid transparent;
-    word-break: break-word;
-    white-space: normal;
-}}
-.stTabs [data-baseweb="tab"]:hover {{
-    color: {C_TEXT};
-    background: {C_ACCENT2}22;
-}}
-
-/* SIDEBAR */
+/* ---- sidebar ---- */
 section[data-testid="stSidebar"],
 section[data-testid="stSidebar"] .block-container {{
     background: {C_SURFACE};
@@ -415,8 +428,14 @@ section[data-testid="stSidebar"] .block-container {{
 .stExpander {{
     background: {C_BG} !important;
     border: 1px solid {C_BORDER} !important;
-    border-radius: 9px !important;
-    transition: border-color 0.22s ease !important;
+    border-radius: var(--radius-sm) !important;
+    transition:
+        border-color var(--dur-mid) var(--ease-std),
+        box-shadow   var(--dur-mid) var(--ease-std) !important;
+}}
+.stExpander:hover {{
+    border-color: {C_ACCENT}44 !important;
+    box-shadow: 0 0 0 1px {C_ACCENT}18 !important;
 }}
 .stExpander:focus-within {{
     border-color: {C_HTPEM}66 !important;
@@ -427,63 +446,81 @@ section[data-testid="stSidebar"] .block-container {{
     font-size: 0.80rem;
     font-weight: 600;
     letter-spacing: 0.03em;
-    word-break: break-word;
-    white-space: normal;
+    transition: color var(--dur-fast) var(--ease-out);
+}}
+.stExpander:hover summary {{ color: {C_TEXT}; }}
+
+/* ---- sliders ---- */
+[data-testid="stSlider"] [role="slider"] {{
+    transition:
+        transform  var(--dur-fast) var(--ease-spring),
+        box-shadow var(--dur-fast) var(--ease-std);
+}}
+[data-testid="stSlider"] [role="slider"]:hover {{
+    transform: scale(1.28);
+    box-shadow: 0 0 0 8px {C_HTPEM}18;
+}}
+[data-testid="stSlider"] [role="slider"]:focus-visible {{
+    box-shadow: 0 0 0 10px {C_HTPEM}28;
 }}
 
-/* BUTTONS */
+/* ---- buttons ---- */
 div[data-testid="stButton"] button,
 div[data-testid="stDownloadButton"] button {{
+    position: relative;
+    overflow: hidden;
     width: 100%;
     background: transparent;
     border: 1px solid {C_BORDER};
     color: {C_MUTED};
-    border-radius: 8px;
+    border-radius: var(--radius-sm);
     font-weight: 600;
     font-size: 0.78rem;
     letter-spacing: 0.04em;
-    transition:
-        border-color 0.24s cubic-bezier(0.22, 1, 0.36, 1),
-        color        0.24s ease,
-        box-shadow   0.24s ease,
-        transform    0.20s cubic-bezier(0.22, 1, 0.36, 1);
-    word-break: break-word;
-    white-space: normal;
     line-height: 1.3;
+    transition:
+        border-color var(--dur-mid) var(--ease-std),
+        color        var(--dur-mid) var(--ease-std),
+        box-shadow   var(--dur-mid) var(--ease-std),
+        transform    var(--dur-fast) var(--ease-spring);
 }}
 div[data-testid="stButton"] button:hover {{
     border-color: {C_HTPEM};
     color: {C_HTPEM};
-    box-shadow: 0 0 14px {C_HTPEM}2a;
+    box-shadow: 0 0 0 1px {C_HTPEM}33, 0 4px 14px {C_HTPEM}20;
     transform: translateY(-1px);
 }}
+div[data-testid="stButton"] button:active {{
+    transform: translateY(0) scale(0.98);
+    transition-duration: var(--dur-fast);
+}}
 div[data-testid="stDownloadButton"] button {{
-    border-color: {C_GREEN}66;
+    border-color: {C_GREEN}55;
     color: {C_GREEN};
 }}
 div[data-testid="stDownloadButton"] button:hover {{
     border-color: {C_GREEN};
-    box-shadow: 0 0 14px {C_GREEN}2a;
-    background: {C_GREEN}0c;
+    box-shadow: 0 0 0 1px {C_GREEN}33, 0 4px 14px {C_GREEN}1a;
+    background: {C_GREEN}0a;
     transform: translateY(-1px);
 }}
 
-/* MISC */
+/* ---- misc ---- */
 hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
 [data-testid="stDataFrame"] {{
     border: 1px solid {C_BORDER};
-    border-radius: 10px;
+    border-radius: var(--radius-md);
     overflow: hidden;
+    transition: box-shadow var(--dur-mid) var(--ease-std);
 }}
+[data-testid="stDataFrame"]:hover {{ box-shadow: var(--shadow-low); }}
 .stCaption, small {{
     color: {C_MUTED} !important;
     font-size: 0.80rem !important;
     line-height: 1.4;
-    word-break: break-word;
-    white-space: normal;
 }}
 
-
+/* ---- eyebrow / legend / badges ---- */
 .eyebrow {{
     font-size: 0.62rem;
     font-weight: 700;
@@ -491,7 +528,7 @@ hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
     text-transform: uppercase;
     color: {C_HTPEM};
     margin-bottom: 4px;
-    animation: fadeIn 0.5s ease both;
+    animation: fadeIn 400ms var(--ease-out) both;
 }}
 .legend-row {{
     display: flex;
@@ -509,28 +546,29 @@ hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
     font-size: 0.75rem;
     font-weight: 600;
     letter-spacing: 0.02em;
-    animation: fadeIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
-    transition: opacity 0.2s ease, transform 0.2s ease;
-    word-break: break-word;
-    white-space: normal;
+    animation: scaleIn 300ms var(--ease-spring) both;
+    transition:
+        opacity    var(--dur-fast) var(--ease-std),
+        transform  var(--dur-fast) var(--ease-spring),
+        box-shadow var(--dur-fast) var(--ease-std);
 }}
-.legend-pill:hover {{ opacity: 0.75; transform: scale(0.97); }}
-
+.legend-pill:hover {{
+    opacity: 0.8;
+    transform: scale(0.96);
+}}
 .route-badge {{
     display: inline-block;
-    background: {C_HTPEM}15;
-    border: 1px solid {C_HTPEM}3a;
+    background: {C_HTPEM}14;
+    border: 1px solid {C_HTPEM}38;
     border-radius: 20px;
     padding: 4px 11px;
     font-size: 0.72rem;
     font-weight: 700;
     color: {C_HTPEM};
     letter-spacing: 0.04em;
-    animation: fadeIn 0.5s ease both;
+    animation: floatIn 450ms var(--ease-spring) 80ms both;
     margin-left: 8px;
     vertical-align: middle;
-    word-break: break-word;
-    white-space: normal;
 }}
 .age-badge {{
     display: inline-block;
@@ -539,20 +577,18 @@ hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
     font-size: 0.72rem;
     font-weight: 700;
     letter-spacing: 0.04em;
-    animation: fadeIn 0.5s ease both;
+    animation: floatIn 450ms var(--ease-spring) 140ms both;
     margin-left: 6px;
     vertical-align: middle;
-    word-break: break-word;
-    white-space: normal;
 }}
 
-
+/* ---- sidebar status / colour legend ---- */
 .status-dot {{
     display: inline-block;
     width: 7px; height: 7px;
     border-radius: 50%;
     background: {C_GREEN};
-    animation: pulse 2.4s ease infinite;
+    animation: pulse 2.6s var(--ease-out) infinite;
     margin-right: 8px;
     vertical-align: middle;
     flex-shrink: 0;
@@ -562,7 +598,7 @@ hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
     align-items: center;
     background: {C_BG};
     border: 1px solid {C_BORDER};
-    border-radius: 8px;
+    border-radius: var(--radius-sm);
     padding: 7px 12px;
     font-size: 0.70rem;
     font-weight: 700;
@@ -570,15 +606,17 @@ hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
     letter-spacing: 0.08em;
     text-transform: uppercase;
     margin-bottom: 10px;
-    animation: borderGlow 5s ease infinite;
+    animation: borderGlow 5.5s var(--ease-std) infinite;
 }}
 .color-legend {{
     background: {C_BG};
     border: 1px solid {C_BORDER};
-    border-radius: 9px;
+    border-radius: var(--radius-sm);
     padding: 12px 14px;
     margin: 0 0 4px;
+    transition: border-color var(--dur-mid) var(--ease-std);
 }}
+.color-legend:hover {{ border-color: {C_ACCENT}44; }}
 .color-legend-title {{
     font-size: 0.60rem;
     font-weight: 700;
@@ -595,17 +633,20 @@ hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
     font-size: 0.78rem;
     color: {C_TEXT};
     font-weight: 500;
-    word-break: break-word;
+    transition: opacity var(--dur-fast) var(--ease-std);
 }}
 .color-legend-row:last-child {{ margin-bottom: 0; }}
+.color-legend-row:hover {{ opacity: 0.85; }}
 .color-swatch {{
     width: 10px; height: 10px;
     border-radius: 3px;
     flex-shrink: 0;
+    transition: transform var(--dur-fast) var(--ease-spring);
 }}
+.color-legend-row:hover .color-swatch {{ transform: scale(1.3); }}
 .color-legend-winner {{
     font-size: 0.62rem;
-    background: {C_HTPEM}15;
+    background: {C_HTPEM}14;
     border: 1px solid {C_HTPEM}33;
     border-radius: 4px;
     padding: 1px 6px;
@@ -615,41 +656,43 @@ hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
     margin-left: auto;
 }}
 
-
+/* ---- callouts ---- */
 .info-callout {{
-    background: {C_HTPEM}0b;
-    border: 1px solid {C_HTPEM}2a;
+    background: {C_HTPEM}0a;
+    border: 1px solid {C_HTPEM}28;
     border-left: 3px solid {C_HTPEM};
-    border-radius: 0 9px 9px 0;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
     padding: 16px 20px;
     font-size: 0.95rem;
     color: {C_MUTED};
     line-height: 1.65;
     margin: 10px 0 6px;
-    animation: fadeIn 0.4s ease both;
+    animation: slideInLeft 360ms var(--ease-spring) both;
+    transition: box-shadow var(--dur-mid) var(--ease-std);
 }}
+.info-callout:hover {{ box-shadow: var(--shadow-low); }}
 .info-callout strong {{ color: {C_TEXT}; font-weight: 600; }}
 
 .warn-callout {{
-    background: {C_ORANGE}0b;
-    border: 1px solid {C_ORANGE}2a;
+    background: {C_ORANGE}0a;
+    border: 1px solid {C_ORANGE}28;
     border-left: 3px solid {C_ORANGE};
-    border-radius: 0 9px 9px 0;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
     padding: 16px 20px;
     font-size: 0.95rem;
     color: {C_MUTED};
     line-height: 1.65;
     margin: 10px 0 6px;
-    animation: fadeIn 0.4s ease both;
+    animation: slideInLeft 360ms var(--ease-spring) both;
 }}
 .warn-callout strong {{ color: {C_ORANGE}; font-weight: 600; }}
 
-/* SECTION ACCENT */
+/* ---- section accent ---- */
 .section-accent {{
     border-left: 3px solid {C_HTPEM};
     padding-left: 10px;
     margin-bottom: 10px;
-    animation: fadeIn 0.4s ease both;
+    animation: fadeIn 300ms var(--ease-out) both;
 }}
 .section-accent h3 {{
     margin: 0;
@@ -663,33 +706,28 @@ hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
     color: {C_MUTED};
 }}
 
-
+/* ---- header accent bar ---- */
 .header-accent-bar {{
     height: 2px;
     width: 100%;
     border-radius: 2px;
     background: linear-gradient(
         90deg,
-        {C_BG},
-        {C_ACCENT2},
-        {C_HTPEM},
-        {C_LTPEM},
-        {C_ACCENT2},
-        {C_BG}
+        {C_BG}, {C_ACCENT2}, {C_HTPEM}, {C_LTPEM}, {C_ACCENT2}, {C_BG}
     );
     background-size: 400% 100%;
-    animation: gradientShift 8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    animation: gradientShift 7s var(--ease-std) infinite;
     margin: 10px 0 20px;
     opacity: 0.90;
 }}
 
-/* GUIDE TAB ELEMENTS */
+/* ---- guide chips ---- */
 .how-to-chip {{
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    background: {C_HTPEM}12;
-    border: 1px solid {C_HTPEM}2a;
+    background: {C_HTPEM}10;
+    border: 1px solid {C_HTPEM}28;
     border-radius: 20px;
     padding: 6px 13px;
     font-size: 0.76rem;
@@ -697,28 +735,31 @@ hr {{ border-color: {C_BORDER} !important; opacity: 1 !important; }}
     color: {C_HTPEM};
     letter-spacing: 0.02em;
     margin: 4px 4px 4px 0;
-    transition: background 0.2s ease, border-color 0.2s ease;
-    word-break: break-word;
-    white-space: normal;
+    transition:
+        background   var(--dur-fast) var(--ease-std),
+        border-color var(--dur-fast) var(--ease-std),
+        transform    var(--dur-fast) var(--ease-spring),
+        box-shadow   var(--dur-fast) var(--ease-std);
+}}
+.how-to-chip:hover {{
+    background: {C_HTPEM}1e;
+    border-color: {C_HTPEM}55;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px {C_HTPEM}18;
 }}
 
-
+/* ---- markdown typography ---- */
 .stMarkdown p, .stMarkdown li {{
     font-size: 1.15rem !important;
     line-height: 1.6 !important;
     color: {C_TEXT} !important;
-    word-break: break-word;
 }}
 .stMarkdown h3 {{
     font-size: 1.4rem !important;
     font-weight: 600 !important;
     color: {C_TEXT} !important;
 }}
-
-/* Hide anchor links on headings */
-.stMarkdown h1 a, .stMarkdown h2 a, .stMarkdown h3 a {{
-    display: none !important;
-}}
+.stMarkdown h1 a, .stMarkdown h2 a, .stMarkdown h3 a {{ display: none !important; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -740,21 +781,27 @@ PLOTLY_BASE = dict(
         namelength=-1,
     ),
     transition=dict(duration=350, easing="cubic-in-out"),
+    # global legend: bottom-anchored so it never overlaps chart area on mobile
+    legend=dict(
+        orientation="h", yanchor="top", y=-0.2, x=0.5, xanchor="center",
+        font=dict(size=12, color=C_MUTED, family="Inter, system-ui, sans-serif"),
+        bgcolor="rgba(0,0,0,0)",
+    ),
 )
 
 
 # SESSION STATE
 DEFAULTS: dict = {
-    "corridor_km":      int(cfg.CORRIDOR_DISTANCE_KM),
+    "corridor_km":      int(ROUTE_SJ_MONCTON.corridor_km),
     "system_age_years": 0,
     "electrolyzer_kw":  1000,
     "capacity_factor":  80,
     "fc_power":         int(cfg.TRAIN_POWER_KW),
-    "trips_per_year":   cfg.TRIPS_PER_YEAR,
+    "trips_per_year":   ROUTE_SJ_MONCTON.trips_per_year,
     "electricity_rate": cfg.NB_POWER_INDUSTRIAL_RATE,
     "diesel_price":     cfg.DIESEL_PRICE_LITER,
     "fc_efficiency":    int(cfg.FC_SYSTEM_EFFICIENCY * 100),
-    "winter_temp":      int(cfg.WINTER_AMBIENT_TEMP_C),
+    "winter_temp":      int(ROUTE_SJ_MONCTON.winter_ambient_temp_c),
 }
 
 for k, v in DEFAULTS.items():
@@ -851,7 +898,7 @@ with st.sidebar:
 
     st.divider()
     st.caption(
-        f"Atlas-H2 v9.2 · Federal ITC **{cfg.FEDERAL_H2_ITC*100:.0f}%** · "
+        f"Atlas-H2 v10.0 · Federal ITC **{cfg.FEDERAL_H2_ITC*100:.0f}%** · "
         f"NB Grid **{cfg.NB_GRID_CARBON_INTENSITY} kg CO₂/kWh**"
     )
 
@@ -870,11 +917,10 @@ winter_temp      = st.session_state.get("winter_temp",      DEFAULTS["winter_tem
 
 electricity_rate = round(electricity_rate, 4)
 diesel_price     = round(diesel_price,     4)
-trip_energy_kwh  = int(corridor_trip_energy_kwh(corridor_km))
+trip_energy_kwh  = int(corridor_trip_energy_kwh(corridor_km, ROUTE_SJ_MONCTON))
 
 
 # run all engines, cached by slider values
-
 @st.cache_data
 def run_all(
     corridor_km: int, system_age_years: int, electrolyzer_kw: int,
@@ -882,8 +928,17 @@ def run_all(
     electricity_rate: float, diesel_price: float, fc_eff_pct: int,
     winter_temp: int,
 ) -> dict:
-    payload_engine = PayloadAnalyzer()
-    thermal_engine = ThermalEfficiencyModule(fc_power_kw=fc_power, trips_per_year=trips_yr)
+    # build a route from the current slider state so all engines share the same source
+    route = RouteProfile(
+        name="slider",
+        corridor_km=float(corridor_km),
+        trip_energy_kwh=corridor_trip_energy_kwh(float(corridor_km), ROUTE_SJ_MONCTON),
+        winter_ambient_temp_c=float(winter_temp),
+        cabin_target_temp_c=ROUTE_SJ_MONCTON.cabin_target_temp_c,
+        trips_per_year=trips_yr,
+    )
+    payload_engine = PayloadAnalyzer(route=route)
+    thermal_engine = ThermalEfficiencyModule(fc_power_kw=fc_power, trips_per_year=trips_yr, route=route)
     econ_engine    = EconomicsEngine(
         electrolyzer_size_kw=electrolyzer_kw,
         capacity_factor=capacity_factor_pct / 100.0,
@@ -908,7 +963,6 @@ def run_all(
         profile=cfg.INNOVATION_HTPEM,
         system_age_years=system_age_years,
     )
-    # [LCOA-1 FIX] annual_h2_cost_cad must include amortised CAPEX so that the LCOA
     # annual H2 cost includes amortised CAPEX so LCOA reflects true all-in cost
     annual_h2_cost_cad = (
         econ_htpem.net_capex_after_itc_cad / EconomicsEngine.ANALYSIS_PERIOD_YEARS
@@ -916,8 +970,7 @@ def run_all(
         + econ_htpem.annual_electricity_cost_cad
     )
     carbon = CarbonAbatementCalculator(
-        trips_per_year=trips_yr,
-        corridor_km=float(corridor_km),
+        route=route,
         annual_h2_cost_cad=annual_h2_cost_cad,
     ).calculate_lifetime(dynamic_diesel_price=diesel_price)
     return dict(payload=payload, thermal=thermal,
@@ -925,12 +978,18 @@ def run_all(
 
 
 @st.cache_data
-def run_sensitivity(electrolyzer_kw: int, capacity_factor_pct: int, system_age_years: int) -> tuple:
+def run_sensitivity(
+    electrolyzer_kw: int,
+    capacity_factor_pct: int,
+    system_age_years: int,
+    profile: TrainProfile = cfg.INNOVATION_HTPEM,
+) -> tuple:
+    # profile is TrainProfile (frozen=True, hashable) so Streamlit can key the cache on it
     se = SensitivityEngine()
     rates, capexes, grid = se.compute_lcoh_grid(
         electrolyzer_size_kw=float(electrolyzer_kw),
         capacity_factor=capacity_factor_pct / 100.0,
-        profile=cfg.INNOVATION_HTPEM,
+        profile=profile,
         system_age_years=system_age_years,
     )
     curve = se.compute_degradation_curve(
@@ -938,7 +997,7 @@ def run_sensitivity(electrolyzer_kw: int, capacity_factor_pct: int, system_age_y
         capacity_factor=capacity_factor_pct / 100.0,
         electricity_rate=cfg.NB_POWER_INDUSTRIAL_RATE,
         capex_per_kw=cfg.ELECTROLYZER_CAPEX_PER_KW,
-        profile=cfg.INNOVATION_HTPEM,
+        profile=profile,
     )
     return rates, capexes, grid, curve
 
@@ -970,7 +1029,7 @@ def build_export_csv(
     _payload = _results["payload"]; _thermal = _results["thermal"]
     _econ_lt = _results["econ_ltpem"]; _econ_ht = _results["econ_htpem"]
     _carbon  = _results["carbon"]
-    _trip_kwh = int(corridor_trip_energy_kwh(_corridor_km))
+    _trip_kwh = int(corridor_trip_energy_kwh(_corridor_km, ROUTE_SJ_MONCTON))
     rows = []
     for p in ALL_PROFILES:
         pl = _payload[p.energy_type]; th = _thermal[p.energy_type]
@@ -1086,7 +1145,7 @@ age_badge_text = (
     else f"Year {system_age_years} · H₂ efficiency {econ_htpem.effective_h2_efficiency*100:.1f}%"
 )
 
-st.markdown('<p class="eyebrow">Atlas-H2 · Digital Infrastructure Twin · v9.2</p>', unsafe_allow_html=True)
+st.markdown('<p class="eyebrow">Atlas-H2 · Digital Infrastructure Twin · v10.0</p>', unsafe_allow_html=True)
 st.markdown('<h1 style="margin-bottom: 1rem;">4-Way Rail Propulsion Comparison — SJ–Moncton Corridor</h1>', unsafe_allow_html=True)
 st.markdown(
     f"<span style='color:{C_MUTED}'>Technologies evaluated: &nbsp;</span>"
@@ -1591,10 +1650,6 @@ with tab3:
             yaxis_title=dict(text="C$ per Year", font_size=12, font_color=C_MUTED),
             xaxis_title=None,
             height=360, margin=dict(t=50, b=100, l=60, r=20),
-            legend=dict(
-                orientation="h", yanchor="top", y=-0.22, x=0.5, xanchor="center",
-                font=dict(size=12, color=C_MUTED, family="Inter, system-ui, sans-serif"), bgcolor="rgba(0,0,0,0)",
-            ),
         )
         fig_stack.update_xaxes(
             tickfont=dict(color=C_MUTED, size=11), linewidth=2, linecolor=C_BORDER,
@@ -1698,10 +1753,6 @@ with tab4:
             yaxis_title=dict(text="C$ per Year", font_size=12, font_color=C_MUTED),
             xaxis_title=None,
             height=480, margin=dict(t=50, b=100, l=60, r=20),
-            legend=dict(
-                orientation="h", yanchor="top", y=-0.20, x=0.5, xanchor="center",
-                font=dict(size=12, color=C_MUTED, family="Inter, system-ui, sans-serif"), bgcolor="rgba(0,0,0,0)",
-            ),
         )
         fig_carbon.update_xaxes(
             tickfont=dict(color=C_MUTED, size=11), linewidth=2, linecolor=C_BORDER,
@@ -1797,6 +1848,7 @@ with tab5:
 
     rates, capexes, z_grid, deg_curve = run_sensitivity(
         electrolyzer_kw, capacity_factor, system_age_years,
+        profile=cfg.INNOVATION_HTPEM,
     )
 
     col_heat, col_curve = st.columns([1.3, 0.7])
@@ -1887,12 +1939,13 @@ with tab5:
         ]
 
         fig_deg = go.Figure()
+        # solid line + circle markers: primary series
         fig_deg.add_scatter(
             x=deg_years, y=deg_lcoh,
             name="Fuel Cost (C$/kg)",
             mode="lines+markers",
-            line=dict(color=C_HTPEM, width=3),
-            marker=dict(size=8, color=C_HTPEM, line_width=1, line_color=C_BG),
+            line=dict(color=C_HTPEM, width=3, dash="solid"),
+            marker=dict(size=8, symbol="circle", color=C_HTPEM, line_width=1, line_color=C_BG),
             hovertemplate="Year %{x}<br>Fuel Cost: <b>C$%{y:.4f}/kg</b><extra></extra>",
         )
         if system_age_years <= 10:
@@ -1905,11 +1958,13 @@ with tab5:
                 hovertemplate=f"<b>Current year</b><br>C${cur_lcoh:.4f}/kg<extra></extra>",
                 showlegend=False,
             )
+        # dotted line + square markers on y2: distinct from primary by both dash and shape
         fig_deg.add_scatter(
             x=deg_years, y=annual_h2_demand,
             name="Annual H₂ Demand (kg)",
-            mode="lines",
+            mode="lines+markers",
             line=dict(color=C_BATT, width=2.5, dash="dot"),
+            marker=dict(size=6, symbol="square", color=C_BATT),
             yaxis="y2",
             hovertemplate="Year %{x}<br>H₂ Demand: <b>%{y:,.0f} kg/yr</b><extra></extra>",
         )
@@ -1942,12 +1997,8 @@ with tab5:
                 automargin=True,
                 zeroline=False,
             ),
-            height=480, margin=dict(t=60, b=80, l=80, r=80),
-            legend=dict(
-                orientation="h", yanchor="top", y=-0.18, x=0.5, xanchor="center",
-                font=dict(size=13, color=C_MUTED, family="Inter, system-ui, sans-serif"),
-                bgcolor="rgba(0,0,0,0)",
-            ),
+            # local override: extra bottom margin to clear the dual-axis legend
+            height=480, margin=dict(t=60, b=100, l=80, r=80),
         )
         fig_deg.update_xaxes(
             showgrid=True, gridwidth=1, gridcolor="rgba(24,67,90,0.25)", zeroline=False,
