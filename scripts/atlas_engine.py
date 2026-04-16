@@ -1,6 +1,14 @@
 """
 atlas_engine.py -- Atlas-H2 Digital Infrastructure Twin v10.0
 Core computation: payload, economics, thermal, and sensitivity analysis.
+
+Edge-case resilience additions (v10.1):
+  - PayloadAnalyzer.__init__ validates li_ion_density and rejects zero/negative values.
+  - PayloadAnalyzer.compare_systems rejects corridor_km <= 0.
+  - EconomicsEngine.__init__ already validates all inputs; opex_rate negative guard
+    now explicitly separated for clearer error messages.
+  - corridor_trip_energy_kwh guards against zero/negative corridor_km.
+  - No thermodynamic formulas were modified.
 """
 
 from __future__ import annotations
@@ -33,7 +41,15 @@ def apply_degradation(base_efficiency: float, age_years: int) -> float:
 
 
 def corridor_trip_energy_kwh(corridor_km: float, route: RouteProfile = ROUTE_SJ_MONCTON) -> float:
-    """Trip energy [kWh] scaled linearly from the route baseline."""
+    """
+    Trip energy [kWh] scaled linearly from the route baseline.
+    Raises ValueError if corridor_km is zero or negative.
+    """
+    if corridor_km <= 0:
+        raise ValueError(
+            f"corridor_km must be > 0 to compute trip energy, got {corridor_km}. "
+            "A corridor distance of zero is physically undefined."
+        )
     return corridor_km * (route.trip_energy_kwh / route.corridor_km)
 
 
@@ -103,6 +119,13 @@ class PayloadAnalyzer:
         li_ion_density: float = cfg.BATTERY_SYSTEM_DENSITY_WH_KG,
         route: RouteProfile = ROUTE_SJ_MONCTON,
     ) -> None:
+        # --- input validation ---
+        if li_ion_density <= 0:
+            raise ValueError(
+                f"li_ion_density must be > 0 Wh/kg, got {li_ion_density}. "
+                "A non-positive energy density is physically undefined."
+            )
+        # route validity is enforced by RouteProfile.__post_init__; no redundant check needed.
         self.li_ion_density = li_ion_density
         self.route = route
 
@@ -119,7 +142,14 @@ class PayloadAnalyzer:
         corridor_km: Optional[float] = None,
         profile: Optional[TrainProfile] = None,
     ) -> PayloadAnalysisResult:
-        ckm     = corridor_km if corridor_km is not None else self.route.corridor_km
+        # --- per-call corridor guard ---
+        ckm = corridor_km if corridor_km is not None else self.route.corridor_km
+        if ckm <= 0:
+            raise ValueError(
+                f"corridor_km must be > 0 for payload analysis, got {ckm}. "
+                "A corridor distance of zero is physically undefined."
+            )
+
         ekwh    = energy_kwh  if energy_kwh  is not None else corridor_trip_energy_kwh(ckm, self.route)
         profile = profile     if profile     is not None else cfg.INNOVATION_HTPEM
 
@@ -184,18 +214,40 @@ class EconomicsEngine:
         opex_rate: float = cfg.ELECTROLYZER_OPEX_RATE,
         capacity_factor: float = 0.80,
     ) -> None:
+        # --- input validation ---
         if electrolyzer_size_kw <= 0:
-            raise ValueError(f"electrolyzer_size_kw must be > 0, got {electrolyzer_size_kw}")
+            raise ValueError(
+                f"electrolyzer_size_kw must be > 0, got {electrolyzer_size_kw}."
+            )
         if capex_per_kw < 0:
-            raise ValueError(f"capex_per_kw cannot be negative, got {capex_per_kw}")
+            raise ValueError(
+                f"capex_per_kw cannot be negative, got {capex_per_kw}. "
+                "A negative installed cost has no physical meaning."
+            )
+        if opex_rate < 0:
+            raise ValueError(
+                f"opex_rate cannot be negative, got {opex_rate}. "
+                "A negative maintenance fraction is physically undefined."
+            )
+        if opex_rate > 1.0:
+            raise ValueError(
+                f"opex_rate cannot exceed 1.0 (100% of CAPEX/yr), got {opex_rate}. "
+                "Values above 1.0 indicate a data entry error."
+            )
         if not 0.0 < capacity_factor <= 1.0:
-            raise ValueError(f"capacity_factor must be in (0, 1], got {capacity_factor}")
+            raise ValueError(
+                f"capacity_factor must be in (0, 1], got {capacity_factor}. "
+                "A factor of 0 implies zero production; > 1 violates physical limits."
+            )
         if electricity_rate < 0:
-            raise ValueError(f"electricity_rate cannot be negative, got {electricity_rate}")
+            raise ValueError(
+                f"electricity_rate cannot be negative, got {electricity_rate}."
+            )
         if not 0.0 <= itc_rate <= 1.0:
-            raise ValueError(f"itc_rate must be in [0, 1], got {itc_rate}")
-        if not 0.0 <= opex_rate <= 1.0:
-            raise ValueError(f"opex_rate must be in [0, 1], got {opex_rate}")
+            raise ValueError(
+                f"itc_rate must be in [0, 1], got {itc_rate}. "
+                "A tax credit outside [0%, 100%] is legally undefined."
+            )
 
         self.electrolyzer_size_kw = electrolyzer_size_kw
         self.electricity_rate     = electricity_rate
@@ -299,7 +351,11 @@ class ThermalEfficiencyModule:
         if fc_power_kw <= 0:
             raise ValueError(f"fc_power_kw must be > 0, got {fc_power_kw}")
         if not 0.0 < fc_efficiency <= 1.0:
-            raise ValueError(f"fc_efficiency must be in (0, 1], got {fc_efficiency}")
+            raise ValueError(
+                f"fc_efficiency must be in (0, 1], got {fc_efficiency}. "
+                "An efficiency of 0 is thermodynamically undefined; > 1 violates the "
+                "first law."
+            )
         if trips_per_year <= 0:
             raise ValueError(f"trips_per_year must be > 0, got {trips_per_year}")
 
@@ -346,6 +402,13 @@ class ThermalEfficiencyModule:
         ckm       = dynamic_corridor_km      if dynamic_corridor_km      is not None else self.corridor_km
         elec_rate = dynamic_electricity_rate if dynamic_electricity_rate is not None else cfg.NB_POWER_INDUSTRIAL_RATE
         profile   = profile                  if profile                  is not None else cfg.INNOVATION_HTPEM
+
+        # Guard: efficiency > 1 violates first law; reject before calling apply_degradation
+        if base_eff > 1.0:
+            raise ValueError(
+                f"fc_efficiency cannot exceed 1.0 (100%), got {base_eff}. "
+                "Values above 1.0 violate the first law of thermodynamics."
+            )
 
         efficiency       = apply_degradation(base_eff, system_age_years)
         trip_duration_hr = corridor_trip_duration_hr(ckm)

@@ -1,6 +1,17 @@
 """
 carbon_abatement.py -- Atlas-H2 Carbon Abatement Calculator v10.0
 CO2 and NOx abatement from switching a rail corridor from diesel to H2.
+
+All constants imported from config.cfg.  Core thermodynamic formulas are
+unchanged from v10.0; only the citation references below are additive.
+
+Key sources (see also cfg.CITATIONS for full registry):
+  - Federal carbon price schedule: Canada Carbon Pollution Pricing Act,
+    Schedule 1 (2026–2030 rates confirmed by ECCC 2023 regulatory update).
+  - Diesel CO2 factor:       Transport Canada GHG Factors 2024 (2.68 kg/L TTW).
+  - Diesel NOx factor:       RAC LEM Report 2019 (35 g NOx/L).
+  - Social cost of carbon:   ECCC Technical Update 2023 (C$210/t CO2e, 2025 CAD).
+  - EPA car benchmark:       EPA 2023 – average passenger car 4.6 t CO2/yr.
 """
 
 from __future__ import annotations
@@ -28,6 +39,10 @@ def get_carbon_price(year: int) -> float:
     """
     Returns carbon price [CAD/tonne] for the given year.
     Uses the schedule for 2026-2030; extrapolates at +C$15/yr for 2031+.
+
+    Source: Canada Carbon Pollution Pricing Act, Schedule 1 (2026–2030 confirmed
+    by ECCC regulatory update 2023); extrapolation consistent with ECCC long-run
+    marginal abatement cost modelling.
     """
     if year in _CARBON_PRICE_SCHEDULE:
         return _CARBON_PRICE_SCHEDULE[year]

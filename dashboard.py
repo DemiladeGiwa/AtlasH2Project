@@ -23,6 +23,7 @@ from atlas_engine import (
     ThermalEfficiencyModule, HeatRecoveryResult,
     SensitivityEngine,
     corridor_trip_energy_kwh,
+    apply_degradation,
 )
 from carbon_abatement import CarbonAbatementCalculator
 
@@ -52,14 +53,24 @@ PROFILE_LABELS: dict[str, str] = {
 
 
 # TOOLTIP DEFINITIONS
+# Each help string cites its primary source so users can verify claims independently.
 HELP_LCOH = (
     "Levelized Cost of Hydrogen: the all-in cost to produce one kg of H₂, "
-    "including amortised equipment cost, annual maintenance, and electricity over the analysis period."
+    "including amortised equipment cost, annual maintenance, and electricity over the analysis period. "
+    "Formula: (Net CAPEX + 10-yr OPEX + 10-yr electricity) ÷ total H₂ produced. "
+    "CAPEX source: IRENA (2022) / BNEF H2 Outlook 2024 (C$1,200/kW central estimate). "
+    "OPEX: NREL H2A v3.0 (2% of CAPEX/yr). "
+    "Electricity: NB Power GRA 2025/26, Schedule 2-B (C$0.1023/kWh). "
+    "Federal ITC: Government of Canada Budget 2023 / Bill C-59 (40% of adjusted CAPEX)."
 )
 HELP_LCOA = (
     "Levelized Cost of Abatement: the net incremental cost to eliminate one tonne of CO₂, "
     "calculated as total H₂ system cost minus avoided diesel purchases divided by CO₂ abated. "
-    "A negative value indicates the H₂ system costs less to operate than the diesel baseline."
+    "A negative value indicates the H₂ system costs less to operate than the diesel baseline. "
+    "Diesel CO₂ factor: 2.68 kg CO₂/L tank-to-wheel (Transport Canada GHG Factors 2024). "
+    "Diesel consumption: 4.5 L/km (RAC LEM Report 2019). "
+    "Carbon price schedule: Canada Carbon Pollution Pricing Act, Schedule 1 (ECCC 2023). "
+    "Social cost of carbon: ECCC Technical Update 2023 (C$210/t CO₂e)."
 )
 HELP_HTPEM = (
     "The core difference lies in the membrane's chemical composition: standard LTPEM units use "
@@ -67,12 +78,35 @@ HELP_HTPEM = (
     "boils off, whereas HTPEM systems utilize an acid-doped PBI membrane. Because this "
     "acid-based chemistry does not rely on water to conduct protons, the fuel cell can maintain "
     "high performance at 160°C, allowing the system to recycle high-grade waste heat and "
-    "tolerate lower-purity hydrogen."
+    "tolerate lower-purity hydrogen. "
+    "Source: Advent Technologies HT-PEM stack (2023); IRENA Green Hydrogen Cost Reduction (2022)."
 )
 HELP_GRAVIMETRIC = (
     "The reduction in available freight or passenger capacity caused by the mass "
     "of onboard energy storage (batteries or H₂ tanks) relative to the diesel baseline, "
-    "which carries negligible storage weight."
+    "which carries negligible storage weight. "
+    "Battery density: 250 Wh/kg system-level (CATL Qilin NMC, 2024). "
+    "LTPEM system density: 1,500 Wh/kg (Ballard FCmove + Hexagon Purus 700-bar tanks). "
+    "HTPEM system density: 1,800 Wh/kg (Advent Technologies + simplified BOP, IRENA 2022). "
+    "Train base mass: 114.3 t (Stadler FLIRT H2 3-car consist, 2024)."
+)
+HELP_CARBON_PRICE = (
+    "Federal carbon price for the selected year. "
+    "Schedule 2026–2030 confirmed by ECCC regulatory update 2023 "
+    "(Canada Carbon Pollution Pricing Act, Schedule 1). "
+    "Post-2030 values extrapolated at +C$15/t/yr, consistent with ECCC long-run marginal "
+    "abatement cost modelling."
+)
+HELP_ITC = (
+    "40% refundable Investment Tax Credit on eligible clean hydrogen production equipment. "
+    "Source: Government of Canada Budget 2023; Income Tax Act s. 127.48 (enacted via Bill C-59, 2024). "
+    "The Clean Technology ITC (s. 127.45, 30%) cannot be stacked with this credit."
+)
+HELP_TANK_RANGE = (
+    "Maximum one-way range on a single H₂ fill. "
+    "Tank capacity: 56 kg at 700 bar (Hexagon Purus Type IV composite tanks; Stadler Rail 2022). "
+    "Consumption: 0.25 kg H₂/km (Alstom Coradia iLint baseline; calibrated to SJ–Moncton profile). "
+    "At 155 km, the train uses approximately 38.75 kg — well within the 56 kg tank."
 )
 
 
@@ -816,11 +850,11 @@ def reset_to_defaults() -> None:
 
 # ROUTE LABEL
 def route_label(km: int) -> str:
-    if 140 <= km <= 170: return f"Saint John to Moncton ({km} km)"
-    if  95 <= km <= 115: return f"Saint John to Fredericton ({km} km)"
-    if 185 <= km <= 215: return f"Moncton to Charlottetown ({km} km)"
-    if km < 95:          return f"Short Regional ({km} km)"
-    if km > 400:         return f"Long Haul Corridor ({km} km)"
+    if 140 <= km <= 170: return f"~Saint John to Moncton ({km} km)"
+    if  95 <= km <= 115: return f"~Saint John to Fredericton ({km} km)"
+    if 185 <= km <= 215: return f"~Moncton to Charlottetown ({km} km)"
+    if km < 95:          return f"~Short Regional ({km} km)"
+    if km > 400:         return f"~Long Haul Corridor ({km} km)"
     return f"Custom Route ({km} km)"
 
 
@@ -899,7 +933,8 @@ with st.sidebar:
     st.divider()
     st.caption(
         f"Atlas-H2 v10.0 · Federal ITC **{cfg.FEDERAL_H2_ITC*100:.0f}%** · "
-        f"NB Grid **{cfg.NB_GRID_CARBON_INTENSITY} kg CO₂/kWh**"
+        f"NB Grid **{cfg.NB_GRID_CARBON_INTENSITY} kg CO₂/kWh** · "
+        f"[Sources: Canada Budget 2023 / ECCC NIR 2023]"
     )
 
 
@@ -1013,6 +1048,55 @@ econ_htpem: LCOHResult                       = results["econ_htpem"]
 carbon                                       = results["carbon"]
 
 
+# PHYSICAL FEASIBILITY CHECKS
+# These run on every slider change and surface st.warning banners when the
+# selected corridor parameters approach or exceed physical design limits.
+
+_h2_required_kg: float = cfg.AVG_CONSUMPTION_KG_KM * corridor_km
+_battery_mass_kg: float = payload["battery"].storage_system_mass_kg
+_htpem_mass_kg: float   = payload["h2_htpem"].storage_system_mass_kg
+
+# Check 1 — H₂ range: does the corridor exceed a single tank fill?
+if _h2_required_kg > cfg.TRAIN_H2_TANK_CAPACITY_KG:
+    _overage_kg = _h2_required_kg - cfg.TRAIN_H2_TANK_CAPACITY_KG
+    st.warning(
+        f"**H₂ Range Constraint:** At {corridor_km} km this corridor requires "
+        f"{_h2_required_kg:.1f} kg of H₂ per trip, which exceeds the "
+        f"{cfg.TRAIN_H2_TANK_CAPACITY_KG:.0f} kg tank capacity by "
+        f"{_overage_kg:.1f} kg. "
+        f"A mid-corridor refuelling stop or extended tank pack would be required. "
+        f"Source: Hexagon Purus 700-bar Type IV tanks; Stadler FLIRT H2 factsheet (2022).",
+        icon="⚠️",
+    )
+
+# Check 2 — Battery storage mass: does it exceed the structural limit?
+if _battery_mass_kg > cfg.STORAGE_MASS_LIMIT_KG:
+    _excess_t = (_battery_mass_kg - cfg.STORAGE_MASS_LIMIT_KG) / 1_000.0
+    st.warning(
+        f"**Battery Payload Infeasibility:** The Battery-EV storage system would weigh "
+        f"{_battery_mass_kg:,.0f} kg at {corridor_km} km, exceeding the practical "
+        f"onboard storage limit of {cfg.STORAGE_MASS_LIMIT_KG/1000:.0f} t "
+        f"by {_excess_t:.1f} t. "
+        f"This would breach NB track loading tolerances and cannot be accommodated "
+        f"within the Stadler FLIRT H2 3-car consist (base mass {cfg.TRAIN_BASE_MASS_TONNES} t). "
+        f"H₂ propulsion is unaffected — HTPEM storage remains "
+        f"{_htpem_mass_kg:,.0f} kg at this corridor length.",
+        icon="⚠️",
+    )
+
+# Check 3 — HTPEM storage mass (long-haul edge case)
+if _htpem_mass_kg > cfg.STORAGE_MASS_LIMIT_KG:
+    st.warning(
+        f"**H₂ Storage Mass Limit:** Even the lighter HTPEM storage system "
+        f"({_htpem_mass_kg:,.0f} kg) exceeds the structural limit of "
+        f"{cfg.STORAGE_MASS_LIMIT_KG/1000:.0f} t at {corridor_km} km. "
+        f"This corridor length would require a purpose-built or articulated consist. "
+        f"All LCOH and abatement figures remain mathematically valid but reflect a "
+        f"hypothetical configuration beyond current Stadler FLIRT H2 specs.",
+        icon="⚠️",
+    )
+
+
 # CSV EXPORT
 @st.cache_data
 def build_export_csv(
@@ -1072,6 +1156,98 @@ def build_export_csv(
     return buf.getvalue().encode()
 
 
+@st.cache_data
+def build_feasibility_csv(
+    _corridor_km: int, _electrolyzer_kw: int, _capacity_factor: int,
+    _trips_per_year: int, _electricity_rate: float, _diesel_price: float,
+    _fc_efficiency: int, _winter_temp: int,
+) -> bytes:
+    """
+    Generates a 10-year annual time-series CSV for external analysis.
+    Columns: Year, Engine Age, LCOH (C$/kg), H₂ Efficiency (%),
+             Annual H₂ Demand (kg), CO₂ Abated (t), NOx Abated (kg),
+             Carbon Price (C$/t), Carbon Credits (C$), Avoided Fuel Cost (C$),
+             Social Benefit (C$), Cumulative CO₂ Abated (t).
+    All values respond to the current sidebar slider state.
+    """
+    from carbon_abatement import CarbonAbatementCalculator, get_carbon_price
+
+    _route = RouteProfile(
+        name="feasibility_export",
+        corridor_km=float(_corridor_km),
+        trip_energy_kwh=corridor_trip_energy_kwh(float(_corridor_km), ROUTE_SJ_MONCTON),
+        winter_ambient_temp_c=float(_winter_temp),
+        cabin_target_temp_c=ROUTE_SJ_MONCTON.cabin_target_temp_c,
+        trips_per_year=_trips_per_year,
+    )
+    _econ = EconomicsEngine(
+        electrolyzer_size_kw=float(_electrolyzer_kw),
+        electricity_rate=_electricity_rate,
+        capacity_factor=_capacity_factor / 100.0,
+    )
+    _annual_h2_cost_base = (
+        _econ.calculate_lcoh(
+            dynamic_electricity_rate=_electricity_rate,
+            profile=cfg.INNOVATION_HTPEM,
+            system_age_years=0,
+        ).net_capex_after_itc_cad / EconomicsEngine.ANALYSIS_PERIOD_YEARS
+        + _econ.calculate_lcoh(
+            dynamic_electricity_rate=_electricity_rate,
+            profile=cfg.INNOVATION_HTPEM,
+            system_age_years=0,
+        ).annual_opex_cad
+        + _econ.calculate_lcoh(
+            dynamic_electricity_rate=_electricity_rate,
+            profile=cfg.INNOVATION_HTPEM,
+            system_age_years=0,
+        ).annual_electricity_cost_cad
+    )
+    _abatement = CarbonAbatementCalculator(
+        route=_route,
+        annual_h2_cost_cad=_annual_h2_cost_base,
+    )
+
+    rows: list[dict] = []
+    cumulative_co2 = 0.0
+    start_year = 2026
+
+    for age in range(EconomicsEngine.ANALYSIS_PERIOD_YEARS):
+        _year = start_year + age
+        _lcoh_r = _econ.calculate_lcoh(
+            dynamic_electricity_rate=_electricity_rate,
+            profile=cfg.INNOVATION_HTPEM,
+            system_age_years=age,
+        )
+        # H₂ demand scales inversely with FC efficiency degradation
+        _base_fc_eff = _fc_efficiency / 100.0
+        _degraded_eff = apply_degradation(_base_fc_eff, age)
+        _base_demand_kg = cfg.AVG_CONSUMPTION_KG_KM * _corridor_km * _trips_per_year
+        _annual_demand_kg = _base_demand_kg * (_base_fc_eff / _degraded_eff)
+
+        _ann = _abatement.calculate_annual(_year, dynamic_diesel_price=_diesel_price)
+        cumulative_co2 += _ann.co2_abated_tonnes
+
+        rows.append({
+            "Year":                    _year,
+            "Engine Age (yr)":         age,
+            "LCOH (C$/kg)":            round(_lcoh_r.lcoh_cad_per_kg, 4),
+            "H2 Electrolyzer Yield (%)": round(_lcoh_r.effective_h2_efficiency * 100, 2),
+            "FC Efficiency (%)":       round(_degraded_eff * 100, 2),
+            "Annual H2 Demand (kg)":   round(_annual_demand_kg, 1),
+            "CO2 Abated (t)":          _ann.co2_abated_tonnes,
+            "NOx Abated (kg)":         _ann.nox_abated_kg,
+            "Carbon Price (C$/t)":     _ann.carbon_price_cad_per_tonne,
+            "Carbon Credits (C$)":     _ann.carbon_credit_value_cad,
+            "Avoided Fuel Cost (C$)":  _ann.avoided_fuel_cost_cad,
+            "Social Benefit (C$)":     _ann.social_benefit_cad,
+            "Cumulative CO2 Abated (t)": round(cumulative_co2, 2),
+        })
+
+    _buf = io.StringIO()
+    pd.DataFrame(rows).to_csv(_buf, index=False)
+    return _buf.getvalue().encode()
+
+
 with st.sidebar:
     st.divider()
     st.download_button(
@@ -1083,6 +1259,21 @@ with st.sidebar:
         file_name=f"AtlasH2_Report_{corridor_km}km_age{system_age_years}yr.csv",
         mime="text/csv",
         use_container_width=True,
+    )
+    st.download_button(
+        label="Download Feasibility Data (10-Year CSV)",
+        data=build_feasibility_csv(
+            corridor_km, electrolyzer_kw, capacity_factor,
+            trips_per_year, electricity_rate, diesel_price, fc_efficiency, winter_temp,
+        ),
+        file_name=f"AtlasH2_Feasibility_{corridor_km}km_10yr.csv",
+        mime="text/csv",
+        use_container_width=True,
+        help=(
+            "Annual simulation over a 10-year horizon: LCOH, H₂ demand, CO₂ abated, "
+            "carbon credits, and avoided fuel cost — updated to your current sidebar settings. "
+            "Use this data for external NPV modelling, grant applications, or regulatory filings."
+        ),
     )
 
 
