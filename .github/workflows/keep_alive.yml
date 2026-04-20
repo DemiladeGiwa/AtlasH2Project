@@ -1,0 +1,30 @@
+name: Streamlit Keep-Alive
+
+on:
+  schedule:
+    - cron: "0 */4 * * *"   # Runs every 4 hours
+  workflow_dispatch:          # Allows you to trigger it manually
+
+jobs:
+  ping:
+    name: Ping Streamlit App
+    runs-on: ubuntu-latest
+    timeout-minutes: 5        
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install requests
+        run: pip install requests
+
+      - name: Ping app
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+        run: python keep_alive.py
