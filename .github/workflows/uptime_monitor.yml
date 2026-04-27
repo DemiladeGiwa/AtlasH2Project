@@ -1,15 +1,15 @@
-name: Streamlit Keep-Alive
+name: Streamlit Uptime Monitor
 
 on:
   schedule:
-    - cron: "0 */4 * * *"   # Runs every 4 hours
-  workflow_dispatch:          # Allows you to trigger it manually
+    - cron: "0 */6 * * *"   # every 6 hours
+  workflow_dispatch:          
 
 jobs:
-  ping:
-    name: Ping Streamlit App
+  wake-app:
+    name: Wake / Refresh Streamlit App
     runs-on: ubuntu-latest
-    timeout-minutes: 5        
+    timeout-minutes: 10       
 
     steps:
       - name: Checkout repository
@@ -21,10 +21,13 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
-      - name: Install requests
-        run: pip install requests
+      - name: Install Python packages
+        run: pip install playwright
 
-      - name: Ping app
+      - name: Install Playwright browsers
+        run: playwright install --with-deps chromium
+
+      - name: Run uptime monitor
         env:
           APP_URL: ${{ secrets.APP_URL }}
-        run: python keep_alive.py
+        run: python uptime_monitor.py
