@@ -13,12 +13,13 @@ from playwright.async_api import async_playwright, TimeoutError as PlaywrightTim
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 APP_URL = os.environ.get("APP_URL", "https://your-app.streamlit.app")
-WAKE_TIMEOUT_MS  = 120_000   # 2 min: max time to wait for app to wake
-PAGE_TIMEOUT_MS  =  30_000   # 30 s:  general navigation timeout
-POLL_INTERVAL_MS =   2_000   # 2 s:   interval between DOM checks while waking
+WAKE_TIMEOUT_MS  = 120_000   
+PAGE_TIMEOUT_MS  =  30_000   
+POLL_INTERVAL_MS =   2_000   
 
-HIBERNATION_TEXT   = "Your app is in the oven"
-WAKE_BUTTON_TEXT   = "Wake up"          
+# Updated to match Streamlit's new hibernation screen text
+HIBERNATION_TEXT   = "gone to sleep"
+WAKE_BUTTON_TEXT   = "Yes, get this app back up"          
 # ──────────────────────────────────────────────────────────────────────────────
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(message)s", datefmt="%Y-%m-%dT%H:%M:%SZ")
@@ -41,10 +42,10 @@ async def check_and_wake() -> bool:
 
             if HIBERNATION_TEXT in body_text or WAKE_BUTTON_TEXT in body_text:
                 log.info("Hibernation screen detected — looking for Wake-up button.")
-                locator = page.get_by_role("button", name=WAKE_BUTTON_TEXT)
-                if not await locator.count():
-                    locator = page.get_by_text(WAKE_BUTTON_TEXT, exact=True)
-
+                
+                # Relaxed the locator to find the button even if there are extra characters
+                locator = page.locator(f"text={WAKE_BUTTON_TEXT}")
+                
                 if await locator.count():
                     log.info("Clicking '%s' button.", WAKE_BUTTON_TEXT)
                     await locator.first.click()
